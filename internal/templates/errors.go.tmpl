@@ -2,6 +2,10 @@
 package {{ .Name }}
 
 import (
+{{- if uniqueErrorTypes . }}
+	"encoding/json"
+	"errors"
+{{- end }}
 	"fmt"
 	"net/http"
 )
@@ -44,3 +48,30 @@ func (e *APIError) Is(target error) bool {
 	}
 	return e.StatusCode == t.StatusCode
 }
+{{ range uniqueErrorTypes . }}
+// {{ . }}Response wraps an APIError with a parsed {{ . }} body.
+type {{ . }}Response struct {
+	*APIError
+	Detail {{ . }}
+}
+
+func (e *{{ . }}Response) Error() string {
+	return e.APIError.Error()
+}
+
+func (e *{{ . }}Response) Unwrap() error {
+	return e.APIError
+}
+
+func parse{{ . }}Error(err error) error {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || len(apiErr.Body) == 0 {
+		return err
+	}
+	resp := &{{ . }}Response{APIError: apiErr}
+	if json.Unmarshal(apiErr.Body, &resp.Detail) == nil {
+		return resp
+	}
+	return err
+}
+{{ end }}

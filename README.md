@@ -82,10 +82,10 @@ package main
 
 import (
     "context"
+    "encoding/json"
+    "errors"
     "fmt"
     "log"
-
-    "errors"
 
     "example.com/gen/petstore"
 )
@@ -100,7 +100,7 @@ func main() {
     ctx := context.Background()
 
     // List pets with pagination
-    iter := client.ListPetsIter(ctx, &petstore.ListPetsParams{})
+    iter := client.ListPetsIter(ctx)
     err := iter.ForEach(func(pet petstore.Pet) error {
         fmt.Printf("Pet: %s (ID: %d)\n", pet.Name, pet.ID)
         return nil
@@ -110,26 +110,31 @@ func main() {
     }
 
     // Create a pet
-    err = client.CreatePet(ctx, petstore.CreatePetRequest{
-        Name: "Buddy",
-    })
+    err = client.CreatePet(ctx, petstore.CreatePetRequest{Name: "Buddy"})
     if err != nil {
-        if errors.Is(err, petstore.ErrBadRequest) {
-            log.Println("Invalid request")
-        }
         log.Fatal(err)
     }
 
-    // Get a specific pet
+    // Get a specific pet — check for a known status code
     pet, err := client.GetPetByID(ctx, 123)
+    if errors.Is(err, petstore.ErrNotFound) {
+        log.Println("Pet not found")
+        return
+    }
     if err != nil {
-        if errors.Is(err, petstore.ErrNotFound) {
-            log.Println("Pet not found")
-            return
-        }
         log.Fatal(err)
     }
     fmt.Printf("Found: %s\n", pet.Name)
+
+    // Extract the spec-defined error body from any API error
+    _, err = client.GetPetByID(ctx, 999)
+    var apiErr *petstore.APIError
+    if errors.As(err, &apiErr) {
+        var body petstore.Error
+        if json.Unmarshal(apiErr.Body, &body) == nil {
+            fmt.Printf("Error %d: %s\n", body.Code, body.Message)
+        }
+    }
 }
 ```
 

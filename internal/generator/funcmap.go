@@ -26,6 +26,8 @@ func FuncMap() template.FuncMap {
 		"paginationItemType":     paginationItemType,
 		"paginationCursorField":  paginationCursorField,
 		"toGoName":               naming.ToGoName,
+		"uniqueErrorTypes":       uniqueErrorTypes,
+		"errorType":              errorType,
 	}
 }
 
@@ -142,6 +144,31 @@ func paginationCursorField(op *ir.OperationDef) string {
 		}
 	}
 	return naming.ToGoName(op.Pagination.CursorParam)
+}
+
+// uniqueErrorTypes returns deduplicated error response type names from all operations.
+func uniqueErrorTypes(pkg *ir.Package) []string {
+	seen := map[string]bool{}
+	var types []string
+	for _, op := range pkg.Operations {
+		for _, resp := range op.ErrorResponses {
+			if resp.TypeName != "" && !seen[resp.TypeName] {
+				seen[resp.TypeName] = true
+				types = append(types, resp.TypeName)
+			}
+		}
+	}
+	return types
+}
+
+// errorType returns the error response type name for an operation, or "".
+func errorType(op *ir.OperationDef) string {
+	for _, resp := range op.ErrorResponses {
+		if resp.TypeName != "" {
+			return resp.TypeName
+		}
+	}
+	return ""
 }
 
 // enumLiteral returns the Go literal representation of an enum value.

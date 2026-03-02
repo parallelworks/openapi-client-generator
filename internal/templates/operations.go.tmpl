@@ -27,11 +27,15 @@ func (c *Client) {{ .Name }}(ctx context.Context{{ range .PathParams }}, {{ .Nam
 		}
 	}
 {{ end }}
+{{- $errType := errorType . -}}
 {{ if successType . }}	var result {{ successType . }}
 	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, &result); err != nil {
-		return nil, err
+		return nil, {{ if $errType }}parse{{ $errType }}Error(err){{ else }}err{{ end }}
 	}
 	return &result, nil
-{{ else }}	return c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, nil)
+{{ else }}	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, nil); err != nil {
+		return {{ if $errType }}parse{{ $errType }}Error(err){{ else }}err{{ end }}
+	}
+	return nil
 {{ end }}}
 {{ end }}
