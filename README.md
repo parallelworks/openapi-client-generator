@@ -9,7 +9,7 @@ Given any OpenAPI 3.1 (or 3.0) spec, it outputs a complete, idiomatic Go client 
 - **Typed models** — structs, enums, type aliases, and union types (allOf/oneOf/anyOf) with JSON marshaling
 - **Client methods** — per-operation methods with `context.Context`, typed parameters, and typed responses
 - **Authentication** — `AuthProvider` interface with built-in Bearer, API key, and Basic auth
-- **Error handling** — `APIError` type with sentinel errors and `errors.Is` support
+- **Error handling** — `APIError` with sentinel errors (`errors.Is`), typed error wrappers with parsed response bodies (`errors.As`)
 - **Pagination** — auto-detected cursor/offset pagination with generic `PageIterator[T]`
 - **Retries** — configurable exponential backoff with jitter and `Retry-After` header support
 - **Middleware** — composable request/response middleware chain
@@ -44,18 +44,6 @@ openapi-client-generator generate --spec petstore.yaml --out ./gen/petstore
 | `--package` | `-p` | Go package name (default: derived from output dir) |
 | `--allow-remote-refs` | | Allow fetching remote `$ref` targets |
 
-### Shell completion
-
-```sh
-# Bash
-openapi-client-generator completion bash > /etc/bash_completion.d/openapi-client-generator
-
-# Zsh
-openapi-client-generator completion zsh > "${fpath[1]}/_openapi-client-generator"
-
-# Fish
-openapi-client-generator completion fish > ~/.config/fish/completions/openapi-client-generator.fish
-```
 
 ## Generated Code
 
@@ -65,7 +53,7 @@ For a Petstore spec, the generator produces:
 gen/petstore/
 ├── auth.go          # AuthProvider interface, BearerAuth, APIKeyAuth, BasicAuth
 ├── client.go        # Client struct, NewClient(), do() with retry + middleware
-├── errors.go        # APIError, ErrNotFound, ErrUnauthorized (errors.Is compatible)
+├── errors.go        # APIError, sentinel errors, typed ErrorResponse wrappers
 ├── helpers.go       # URL building, query param encoding
 ├── middleware.go     # Middleware type, WithMiddleware()
 ├── operations.go    # ListPets(), CreatePet(), GetPetByID(), DeletePet()
@@ -82,7 +70,6 @@ package main
 
 import (
     "context"
-    "encoding/json"
     "errors"
     "fmt"
     "log"
@@ -126,14 +113,11 @@ func main() {
     }
     fmt.Printf("Found: %s\n", pet.Name)
 
-    // Extract the spec-defined error body from any API error
+    // Extract the parsed error body using the typed error wrapper
     _, err = client.GetPetByID(ctx, 999)
-    var apiErr *petstore.APIError
-    if errors.As(err, &apiErr) {
-        var body petstore.Error
-        if json.Unmarshal(apiErr.Body, &body) == nil {
-            fmt.Printf("Error %d: %s\n", body.Code, body.Message)
-        }
+    var errResp *petstore.ErrorResponse
+    if errors.As(err, &errResp) {
+        fmt.Printf("Error %d: %s\n", errResp.Detail.Code, errResp.Detail.Message)
     }
 }
 ```
