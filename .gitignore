@@ -1,0 +1,28 @@
+# Binaries
+openapi-client-generator
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test output
+*.test
+*.out
+coverage.html
+
+# Generated output
+/gen/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependency directory
+/vendor/
