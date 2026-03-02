@@ -36,7 +36,7 @@ func NewClient(baseURL string, opts ...ClientOption) *Client {
 }
 
 // do executes an HTTP request and decodes the response.
-func (c *Client) do(ctx context.Context, method string, path string, body any, result any) error {
+func (c *Client) do(ctx context.Context, method string, path string, body any, result any, headers ...http.Header) error {
 	fullURL := c.baseURL + path
 
 	var jsonBody []byte
@@ -94,6 +94,13 @@ func (c *Client) do(ctx context.Context, method string, path string, body any, r
 		req.Header.Set("Accept", "application/json")
 		if c.userAgent != "" {
 			req.Header.Set("User-Agent", c.userAgent)
+		}
+		for _, h := range headers {
+			for k, vs := range h {
+				for _, v := range vs {
+					req.Header.Set(k, v)
+				}
+			}
 		}
 
 {{ if .AuthSchemes }}		if c.auth != nil {

@@ -3,6 +3,8 @@ package {{ .Name }}
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"net/url"
 )
 {{ range .Operations }}
@@ -18,22 +20,27 @@ func (c *Client) {{ .Name }}(ctx context.Context{{ range .PathParams }}, {{ .Nam
 	path := "{{ .Path }}"
 {{ range .PathParams }}	path = pathReplace(path, "{{ .OrigName }}", {{ .Name }})
 {{ end }}
-{{ if hasOptionalParams . }}	if len(opts) > 0 {
+{{ if hasOptionalParams . }}{{- $hasQuery := hasOptionalQueryParams . }}{{- $hasHeader := hasOptionalHeaderParams . }}{{ if $hasHeader }}	var headers http.Header
+{{ end }}	if len(opts) > 0 {
 		params := opts[0]
-		queryValues := url.Values{}
+{{ if $hasQuery }}		queryValues := url.Values{}
 {{ range .QueryParams }}{{ if not .Required }}		addQueryParam(queryValues, "{{ .OrigName }}", params.{{ .FieldName }})
 {{ end }}{{ end }}		if len(queryValues) > 0 {
 			path += "?" + queryValues.Encode()
 		}
-	}
+{{ end }}{{ if $hasHeader }}		headers = make(http.Header)
+{{ range .HeaderParams }}{{ if not .Required }}		if params.{{ .FieldName }} != nil {
+			headers.Set("{{ .OrigName }}", fmt.Sprintf("%v", *params.{{ .FieldName }}))
+		}
+{{ end }}{{ end }}{{ end }}	}
 {{ end }}
 {{- $errType := errorType . -}}
 {{ if successType . }}	var result {{ successType . }}
-	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, &result); err != nil {
+	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, &result{{ if hasOptionalHeaderParams . }}, headers{{ end }}); err != nil {
 		return nil, {{ if $errType }}parse{{ $errType }}Error(err){{ else }}err{{ end }}
 	}
 	return &result, nil
-{{ else }}	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, nil); err != nil {
+{{ else }}	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, nil{{ if hasOptionalHeaderParams . }}, headers{{ end }}); err != nil {
 		return {{ if $errType }}parse{{ $errType }}Error(err){{ else }}err{{ end }}
 	}
 	return nil

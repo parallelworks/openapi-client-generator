@@ -19,6 +19,8 @@ func FuncMap() template.FuncMap {
 		"successType":            successType,
 		"hasBody":                hasBody,
 		"hasOptionalParams":      hasOptionalParams,
+		"hasOptionalQueryParams":  hasOptionalQueryParams,
+		"hasOptionalHeaderParams": hasOptionalHeaderParams,
 		"paramType":              paramType,
 		"hasUnions":              hasUnions,
 		"discriminatorFieldName": discriminatorFieldName,
@@ -81,6 +83,26 @@ func hasOptionalParams(op *ir.OperationDef) bool {
 		}
 	}
 	for _, p := range op.CookieParams {
+		if !p.Required {
+			return true
+		}
+	}
+	return false
+}
+
+// hasOptionalQueryParams returns true if the operation has optional query parameters.
+func hasOptionalQueryParams(op *ir.OperationDef) bool {
+	for _, p := range op.QueryParams {
+		if !p.Required {
+			return true
+		}
+	}
+	return false
+}
+
+// hasOptionalHeaderParams returns true if the operation has optional header parameters.
+func hasOptionalHeaderParams(op *ir.OperationDef) bool {
+	for _, p := range op.HeaderParams {
 		if !p.Required {
 			return true
 		}
