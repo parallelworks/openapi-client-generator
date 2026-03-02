@@ -264,6 +264,9 @@ func (a *Analyzer) convertSingleResponse(code string, resp *v3high.Response) *ir
 			for contentType, mediaType := range resp.Content.FromOldest() {
 				rd.ContentType = contentType
 				rd.TypeName = a.resolveMediaTypeSchema(mediaType)
+				if rd.TypeName == "" && strings.HasPrefix(contentType, "text/") {
+					rd.TypeName = "string"
+				}
 				break
 			}
 		}
