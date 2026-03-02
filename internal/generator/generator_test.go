@@ -556,6 +556,48 @@ func TestHasOptionalHeaderParams(t *testing.T) {
 	}
 }
 
+func TestSuccessContentType(t *testing.T) {
+	tests := []struct {
+		name string
+		op   *ir.OperationDef
+		want string
+	}{
+		{
+			name: "nil success response",
+			op:   &ir.OperationDef{},
+			want: "application/json",
+		},
+		{
+			name: "empty content type",
+			op: &ir.OperationDef{
+				SuccessResponse: &ir.ResponseDef{TypeName: "string"},
+			},
+			want: "application/json",
+		},
+		{
+			name: "application/json",
+			op: &ir.OperationDef{
+				SuccessResponse: &ir.ResponseDef{ContentType: "application/json", TypeName: "Pet"},
+			},
+			want: "application/json",
+		},
+		{
+			name: "text/plain",
+			op: &ir.OperationDef{
+				SuccessResponse: &ir.ResponseDef{ContentType: "text/plain", TypeName: "string"},
+			},
+			want: "text/plain",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := successContentType(tt.op); got != tt.want {
+				t.Errorf("successContentType() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEnumLiteral(t *testing.T) {
 	tests := []struct {
 		val  *ir.EnumVal

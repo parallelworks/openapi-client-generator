@@ -36,7 +36,7 @@ func NewClient(baseURL string, opts ...ClientOption) *Client {
 }
 
 // do executes an HTTP request and decodes the response.
-func (c *Client) do(ctx context.Context, method string, path string, body any, result any, headers ...http.Header) error {
+func (c *Client) do(ctx context.Context, method string, path string, body any, result any, accept string, headers ...http.Header) error {
 	fullURL := c.baseURL + path
 
 	var jsonBody []byte
@@ -91,7 +91,7 @@ func (c *Client) do(ctx context.Context, method string, path string, body any, r
 				return io.NopCloser(bytes.NewReader(bodyBytes)), nil
 			}
 		}
-		req.Header.Set("Accept", "application/json")
+		req.Header.Set("Accept", accept)
 		if c.userAgent != "" {
 			req.Header.Set("User-Agent", c.userAgent)
 		}
@@ -139,8 +139,17 @@ func (c *Client) do(ctx context.Context, method string, path string, body any, r
 		}
 
 		if result != nil && len(respBody) > 0 {
-			if err := json.Unmarshal(respBody, result); err != nil {
-				return fmt.Errorf("decoding response body: %w", err)
+			ct := resp.Header.Get("Content-Type")
+			if strings.Contains(ct, "json") || ct == "" {
+				if err := json.Unmarshal(respBody, result); err != nil {
+					return fmt.Errorf("decoding response body: %w", err)
+				}
+			} else if s, ok := result.(*string); ok {
+				*s = string(respBody)
+			} else {
+				if err := json.Unmarshal(respBody, result); err != nil {
+					return fmt.Errorf("decoding response body: %w", err)
+				}
 			}
 		}
 

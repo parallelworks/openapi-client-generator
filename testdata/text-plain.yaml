@@ -1,0 +1,58 @@
+openapi: "3.1.0"
+info:
+  title: Text Plain Test API
+  version: "1.0.0"
+paths:
+  /auth/whoami:
+    get:
+      operationId: whoami
+      summary: Get the current user identity
+      responses:
+        "200":
+          description: The current user identity as plain text
+          content:
+            text/plain:
+              schema:
+                type: string
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check endpoint returning JSON
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                required:
+                  - status
+  /version:
+    get:
+      operationId: getVersion
+      summary: Get version as plain text without schema
+      responses:
+        "200":
+          description: The version string
+          content:
+            text/plain: {}
+  /mixed:
+    get:
+      operationId: getMixed
+      summary: Endpoint with both JSON and text/plain responses
+      responses:
+        "200":
+          description: The result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  value:
+                    type: string
+            text/plain:
+              schema:
+                type: string

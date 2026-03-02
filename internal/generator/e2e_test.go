@@ -114,6 +114,97 @@ func TestE2E_PetstoreGeneration(t *testing.T) {
 	t.Log("generated code compiles successfully")
 }
 
+func TestE2E_TextPlainGeneration(t *testing.T) {
+	specPath := filepath.Join(projectRoot(), "testdata", "text-plain.yaml")
+
+	result, err := parser.Parse(specPath, parser.Config{})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	a := analyzer.New(result.Model)
+	pkg, err := a.Analyze("textplain")
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+
+	gen, err := New(pkg)
+	if err != nil {
+		t.Fatalf("New generator: %v", err)
+	}
+
+	files, err := gen.Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	// Write to temp dir and verify compilation.
+	tmpDir := t.TempDir()
+	goMod := []byte("module textplain-e2e-test\n\ngo 1.25.5\n")
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), goMod, 0o644); err != nil {
+		t.Fatalf("writing go.mod: %v", err)
+	}
+	if err := WriteFiles(tmpDir, files); err != nil {
+		t.Fatalf("WriteFiles: %v", err)
+	}
+
+	cmd := exec.Command("go", "build", "./...")
+	cmd.Dir = tmpDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		for _, f := range files {
+			t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
+		}
+		t.Fatalf("go build failed: %v\n%s", err, string(output))
+	}
+
+	// Verify operations.go has correct content type handling.
+	var opsContent string
+	for _, f := range files {
+		if f.Name == "operations.go" {
+			opsContent = string(f.Content)
+			break
+		}
+	}
+	if opsContent == "" {
+		t.Fatal("expected operations.go in generated files")
+	}
+
+	// Whoami should pass text/plain accept header.
+	if !strings.Contains(opsContent, `"text/plain"`) {
+		t.Error("operations.go should contain text/plain accept header for Whoami")
+	}
+
+	// HealthCheck should pass application/json accept header.
+	if !strings.Contains(opsContent, `"application/json"`) {
+		t.Error("operations.go should contain application/json accept header for HealthCheck")
+	}
+
+	// Verify client.go uses accept parameter and has content-type-aware decoding.
+	var clientContent string
+	for _, f := range files {
+		if f.Name == "client.go" {
+			clientContent = string(f.Content)
+			break
+		}
+	}
+	if clientContent == "" {
+		t.Fatal("expected client.go in generated files")
+	}
+
+	if !strings.Contains(clientContent, "accept string") {
+		t.Error("client.go do() method should have accept string parameter")
+	}
+	if !strings.Contains(clientContent, `resp.Header.Get("Content-Type")`) {
+		t.Error("client.go should check response Content-Type header")
+	}
+	if !strings.Contains(clientContent, `result.(*string)`) {
+		t.Error("client.go should have *string type assertion for text responses")
+	}
+
+	t.Log("text/plain generated code compiles successfully")
+}
+
 func TestE2E_HeaderParamsGeneration(t *testing.T) {
 	specPath := filepath.Join(projectRoot(), "testdata", "header-params.yaml")
 

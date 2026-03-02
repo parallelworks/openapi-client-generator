@@ -144,6 +144,68 @@ func TestAnalyzeOperations_Petstore(t *testing.T) {
 	}
 }
 
+func TestAnalyzeOperations_TextPlain(t *testing.T) {
+	specPath := filepath.Join(projectRoot(), "testdata", "text-plain.yaml")
+
+	result, err := parser.Parse(specPath, parser.Config{})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	a := New(result.Model)
+	pkg, err := a.Analyze("textplain")
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+
+	opMap := make(map[string]*ir.OperationDef)
+	for _, op := range pkg.Operations {
+		opMap[op.Name] = op
+	}
+
+	// Whoami: text/plain with schema type: string
+	whoami, ok := opMap["Whoami"]
+	if !ok {
+		t.Fatal("expected Whoami operation")
+	}
+	if whoami.SuccessResponse == nil {
+		t.Fatal("Whoami: expected SuccessResponse")
+	}
+	if whoami.SuccessResponse.ContentType != "text/plain" {
+		t.Errorf("Whoami.SuccessResponse.ContentType = %q, want text/plain", whoami.SuccessResponse.ContentType)
+	}
+	if whoami.SuccessResponse.TypeName != "string" {
+		t.Errorf("Whoami.SuccessResponse.TypeName = %q, want string", whoami.SuccessResponse.TypeName)
+	}
+
+	// GetVersion: text/plain with no schema — should default to string
+	getVersion, ok := opMap["GetVersion"]
+	if !ok {
+		t.Fatal("expected GetVersion operation")
+	}
+	if getVersion.SuccessResponse == nil {
+		t.Fatal("GetVersion: expected SuccessResponse")
+	}
+	if getVersion.SuccessResponse.ContentType != "text/plain" {
+		t.Errorf("GetVersion.SuccessResponse.ContentType = %q, want text/plain", getVersion.SuccessResponse.ContentType)
+	}
+	if getVersion.SuccessResponse.TypeName != "string" {
+		t.Errorf("GetVersion.SuccessResponse.TypeName = %q, want string", getVersion.SuccessResponse.TypeName)
+	}
+
+	// GetMixed: has both JSON and text/plain — should prefer JSON
+	getMixed, ok := opMap["GetMixed"]
+	if !ok {
+		t.Fatal("expected GetMixed operation")
+	}
+	if getMixed.SuccessResponse == nil {
+		t.Fatal("GetMixed: expected SuccessResponse")
+	}
+	if getMixed.SuccessResponse.ContentType != "application/json" {
+		t.Errorf("GetMixed.SuccessResponse.ContentType = %q, want application/json", getMixed.SuccessResponse.ContentType)
+	}
+}
+
 func TestAnalyzeOperations_EmptyPaths(t *testing.T) {
 	a := New(&v3high.Document{})
 	pkg, err := a.Analyze("test")

@@ -30,6 +30,7 @@ func FuncMap() template.FuncMap {
 		"toGoName":               naming.ToGoName,
 		"uniqueErrorTypes":       uniqueErrorTypes,
 		"errorType":              errorType,
+		"successContentType":     successContentType,
 	}
 }
 
@@ -191,6 +192,15 @@ func errorType(op *ir.OperationDef) string {
 		}
 	}
 	return ""
+}
+
+// successContentType returns the content type of the operation's success response.
+// Defaults to "application/json" if no content type is set.
+func successContentType(op *ir.OperationDef) string {
+	if op.SuccessResponse == nil || op.SuccessResponse.ContentType == "" {
+		return "application/json"
+	}
+	return op.SuccessResponse.ContentType
 }
 
 // enumLiteral returns the Go literal representation of an enum value.
