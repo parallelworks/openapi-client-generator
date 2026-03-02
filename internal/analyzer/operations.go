@@ -168,7 +168,7 @@ func (a *Analyzer) convertParam(param *v3high.Parameter) (*ir.ParamDef, error) {
 
 	return &ir.ParamDef{
 		Name:        naming.ToGoParamName(param.Name),
-		FieldName:   naming.ToGoName(param.Name),
+		FieldName:   naming.ToGoFieldName(param.Name),
 		OrigName:    param.Name,
 		Location:    param.In,
 		Type:        goType,

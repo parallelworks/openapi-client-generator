@@ -128,6 +128,28 @@ func ToGoName(s string) string {
 	return result
 }
 
+// ToGoFieldName converts any OpenAPI identifier to a valid Go exported
+// identifier in PascalCase for use as a struct field name. Unlike ToGoName,
+// it does not escape Go reserved words because struct fields are accessed
+// via selectors (e.g., obj.Type) which never conflict with keywords.
+func ToGoFieldName(s string) string {
+	if s == "" {
+		return "Unknown"
+	}
+
+	words := splitIdentifier(s)
+	if len(words) == 0 {
+		return "Unknown"
+	}
+
+	var b strings.Builder
+	for _, w := range words {
+		b.WriteString(capitalizeWord(w))
+	}
+
+	return b.String()
+}
+
 // ToGoParamName converts any OpenAPI identifier to a valid Go unexported
 // identifier in camelCase.
 func ToGoParamName(s string) string {

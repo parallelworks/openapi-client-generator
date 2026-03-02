@@ -152,7 +152,7 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 			}
 
 			td.Fields = append(td.Fields, &ir.Field{
-				Name:      naming.ToGoName(propName),
+				Name:      naming.ToGoFieldName(propName),
 				JSONName:  propName,
 				Type:      goType,
 				Required:  required,
@@ -279,7 +279,7 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 		}
 
 		td.Fields = append(td.Fields, &ir.Field{
-			Name:      naming.ToGoName(propName),
+			Name:      naming.ToGoFieldName(propName),
 			JSONName:  propName,
 			Type:      goType,
 			Required:  required,

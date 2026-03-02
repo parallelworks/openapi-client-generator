@@ -14,11 +14,12 @@ type {{ .Name }}Params struct {
 {{ end }}{{ end }}}
 {{ end }}
 {{ if .Description }}// {{ .Name }} - {{ cleanDoc .Description }}{{ end }}
-func (c *Client) {{ .Name }}(ctx context.Context{{ range .PathParams }}, {{ .Name }} {{ .Type }}{{ end }}{{ if hasBody . }}, body {{ if .RequestBody }}{{ if not .RequestBody.Required }}*{{ end }}{{ .RequestBody.TypeName }}{{ else }}any{{ end }}{{ end }}{{ if hasOptionalParams . }}, params *{{ .Name }}Params{{ end }}) {{ if successType . }}(*{{ successType . }}, error){{ else }}error{{ end }} {
+func (c *Client) {{ .Name }}(ctx context.Context{{ range .PathParams }}, {{ .Name }} {{ .Type }}{{ end }}{{ if hasBody . }}, body {{ if .RequestBody }}{{ if not .RequestBody.Required }}*{{ end }}{{ .RequestBody.TypeName }}{{ else }}any{{ end }}{{ end }}{{ if hasOptionalParams . }}, opts ...{{ .Name }}Params{{ end }}) {{ if successType . }}(*{{ successType . }}, error){{ else }}error{{ end }} {
 	path := "{{ .Path }}"
 {{ range .PathParams }}	path = pathReplace(path, "{{ .OrigName }}", {{ .Name }})
 {{ end }}
-{{ if hasOptionalParams . }}	if params != nil {
+{{ if hasOptionalParams . }}	if len(opts) > 0 {
+		params := opts[0]
 		queryValues := url.Values{}
 {{ range .QueryParams }}{{ if not .Required }}		addQueryParam(queryValues, "{{ .OrigName }}", params.{{ .FieldName }})
 {{ end }}{{ end }}		if len(queryValues) > 0 {
