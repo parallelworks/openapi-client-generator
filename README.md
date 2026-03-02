@@ -17,19 +17,27 @@ Given any OpenAPI 3.1 (or 3.0) spec, it outputs a complete, idiomatic Go client 
 
 ## Installation
 
+Add as a tool dependency to your project (recommended):
+
+```sh
+go get -tool github.com/parallelworks/openapi-client-generator@latest
+```
+
+This pins the generator version in your `go.mod` so every team member uses the same version.
+
+Or install globally:
+
 ```sh
 go install github.com/parallelworks/openapi-client-generator@latest
 ```
 
-Or build from source:
+## Usage
 
 ```sh
-git clone https://github.com/parallelworks/openapi-client-generator.git
-cd openapi-client-generator
-go build -o openapi-client-generator .
+go tool openapi-client-generator generate --spec petstore.yaml --out ./gen/petstore
 ```
 
-## Usage
+If installed globally via `go install`:
 
 ```sh
 openapi-client-generator generate --spec petstore.yaml --out ./gen/petstore
