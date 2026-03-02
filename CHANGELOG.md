@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.1...v0.1.2) (2026-03-02)
+
+
+### Bug Fixes
+
+* text/plain handling ([#7](https://github.com/parallelworks/openapi-client-generator/issues/7)) ([9d19c6e](https://github.com/parallelworks/openapi-client-generator/commit/9d19c6e56b23f4834348b310ec7b562035eca191))
+
 ## [0.1.1](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.0...v0.1.1) (2026-03-02)
 
 
