@@ -1,0 +1,136 @@
+openapi: "3.1.0"
+info:
+  title: Complex Schemas Test
+  version: 1.0.0
+  description: Test spec for advanced schema composition
+servers:
+  - url: https://api.example.com/v1
+paths: {}
+components:
+  schemas:
+    # --- Base types ---
+    Animal:
+      type: object
+      required:
+        - name
+        - species
+      properties:
+        name:
+          type: string
+        species:
+          type: string
+
+    # --- allOf: Dog extends Animal with extra fields ---
+    Dog:
+      allOf:
+        - $ref: "#/components/schemas/Animal"
+        - type: object
+          required:
+            - breed
+          properties:
+            breed:
+              type: string
+            isGoodBoy:
+              type: boolean
+
+    # --- oneOf with discriminator ---
+    Circle:
+      type: object
+      required:
+        - shapeType
+        - radius
+      properties:
+        shapeType:
+          type: string
+        radius:
+          type: number
+          format: double
+
+    Rectangle:
+      type: object
+      required:
+        - shapeType
+        - width
+        - height
+      properties:
+        shapeType:
+          type: string
+        width:
+          type: number
+          format: double
+        height:
+          type: number
+          format: double
+
+    Shape:
+      oneOf:
+        - $ref: "#/components/schemas/Circle"
+        - $ref: "#/components/schemas/Rectangle"
+      discriminator:
+        propertyName: shapeType
+        mapping:
+          circle: "#/components/schemas/Circle"
+          rectangle: "#/components/schemas/Rectangle"
+
+    # --- anyOf without discriminator ---
+    StringOrInt:
+      anyOf:
+        - type: object
+          properties:
+            stringValue:
+              type: string
+        - type: object
+          properties:
+            intValue:
+              type: integer
+              format: int64
+
+    # --- additionalProperties: bool true (map[string]any) ---
+    Metadata:
+      type: object
+      additionalProperties: true
+
+    # --- additionalProperties: typed schema (map[string]string) ---
+    Labels:
+      type: object
+      additionalProperties:
+        type: string
+
+    # --- Object with both properties AND additionalProperties ---
+    Config:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+      additionalProperties:
+        type: string
+
+    # --- Nested composition: allOf inside oneOf ---
+    DogOrCircle:
+      oneOf:
+        - $ref: "#/components/schemas/Dog"
+        - $ref: "#/components/schemas/Circle"
+
+    # --- allOf with multiple refs ---
+    Timestamped:
+      type: object
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    TimestampedDog:
+      allOf:
+        - $ref: "#/components/schemas/Dog"
+        - $ref: "#/components/schemas/Timestamped"
+        - type: object
+          properties:
+            registrationId:
+              type: string
