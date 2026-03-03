@@ -96,6 +96,23 @@ func TestAnalyzePetstore(t *testing.T) {
 		}
 	}
 
+	// Verify type-level description.
+	if pet.Description != "A pet in the store" {
+		t.Errorf("Pet.Description = %q, want %q", pet.Description, "A pet in the store")
+	}
+
+	// Verify field-level descriptions are extracted from property schemas.
+	if idField, ok := fieldMap["id"]; ok {
+		if idField.Description != "The unique identifier for the pet" {
+			t.Errorf("Pet.id.Description = %q, want %q", idField.Description, "The unique identifier for the pet")
+		}
+	}
+	if nameField, ok := fieldMap["name"]; ok {
+		if nameField.Description != "The display name of the pet" {
+			t.Errorf("Pet.name.Description = %q, want %q", nameField.Description, "The display name of the pet")
+		}
+	}
+
 	// tag is type: ["string", "null"] -- should be nullable.
 	if tagField, ok := fieldMap["tag"]; ok {
 		if tagField.Type != "*string" {
@@ -118,6 +135,9 @@ func TestAnalyzePetstore(t *testing.T) {
 	}
 	if len(petStatus.EnumValues) != 3 {
 		t.Errorf("PetStatus: expected 3 enum values, got %d", len(petStatus.EnumValues))
+	}
+	if petStatus.Description != "The current status of the pet in the store" {
+		t.Errorf("PetStatus.Description = %q, want %q", petStatus.Description, "The current status of the pet in the store")
 	}
 
 	// PetList should be a struct with an items field that is an array.
@@ -407,6 +427,18 @@ func TestAnalyzePetstore_FieldDetails(t *testing.T) {
 		}
 	} else {
 		t.Error("Error missing message field")
+	}
+
+	// Verify field descriptions are extracted from property schemas.
+	if nameField, ok := fieldMap["name"]; ok {
+		if nameField.Description != "The name of the pet to create" {
+			t.Errorf("CreatePetRequest.name.Description = %q, want %q", nameField.Description, "The name of the pet to create")
+		}
+	}
+	if tagField, ok := fieldMap["tag"]; ok {
+		if tagField.Description != "An optional tag for the pet" {
+			t.Errorf("CreatePetRequest.tag.Description = %q, want %q", tagField.Description, "An optional tag for the pet")
+		}
 	}
 
 	// PetStatus enum values.

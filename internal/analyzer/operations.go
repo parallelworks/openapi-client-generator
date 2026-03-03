@@ -53,6 +53,7 @@ func (a *Analyzer) convertOperation(httpMethod, path string, pathItem *v3high.Pa
 
 	opDef := &ir.OperationDef{
 		Name:        name,
+		Summary:     op.Summary,
 		Description: op.Description,
 		HTTPMethod:  httpMethod,
 		Path:        path,
@@ -174,6 +175,7 @@ func (a *Analyzer) convertParam(param *v3high.Parameter) (*ir.ParamDef, error) {
 		Type:        goType,
 		Required:    required,
 		Description: param.Description,
+		Deprecated:  param.Deprecated,
 		Style:       param.Style,
 		Explode:     explode,
 	}, nil

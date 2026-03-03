@@ -13,6 +13,11 @@ import (
 func FuncMap() template.FuncMap {
 	return template.FuncMap{
 		"cleanDoc":               cleanDoc,
+		"opDocComment":           opDocComment,
+		"typeDocComment":         typeDocComment,
+		"fieldDocComment":        fieldDocComment,
+		"paramDocComment":        paramDocComment,
+		"indent":                 indent,
 		"jsonTag":                jsonTag,
 		"enumLiteral":            enumLiteral,
 		"hasOperations":          hasOperations,
@@ -40,6 +45,132 @@ func cleanDoc(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
 	return strings.TrimSpace(s)
+}
+
+// commentLines splits a description into properly prefixed Go comment lines.
+// Each line gets a "// " prefix; blank lines produce "//".
+func commentLines(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	var lines []string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimRight(line, " \t")
+		if line == "" {
+			lines = append(lines, "//")
+		} else {
+			lines = append(lines, "// "+line)
+		}
+	}
+	return lines
+}
+
+// typeDocComment generates a Go doc comment for a type definition.
+// Format: "// TypeName - description" with multi-line support.
+func typeDocComment(td *ir.TypeDef) string {
+	desc := strings.TrimSpace(td.Description)
+	if desc == "" {
+		return ""
+	}
+	desc = strings.ReplaceAll(desc, "\r\n", "\n")
+	lines := strings.Split(desc, "\n")
+	var parts []string
+	parts = append(parts, "// "+td.Name+" - "+strings.TrimRight(lines[0], " \t"))
+	for _, line := range lines[1:] {
+		line = strings.TrimRight(line, " \t")
+		if line == "" {
+			parts = append(parts, "//")
+		} else {
+			parts = append(parts, "// "+line)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// opDocComment generates a complete Go doc comment for an operation method.
+// It combines Summary (first line), Description (body), and Deprecated marker.
+func opDocComment(op *ir.OperationDef) string {
+	summary := strings.TrimSpace(op.Summary)
+	desc := strings.TrimSpace(op.Description)
+
+	var parts []string
+
+	if summary != "" && desc != "" {
+		parts = append(parts, "// "+op.Name+" - "+summary)
+		parts = append(parts, "//")
+		parts = append(parts, commentLines(desc)...)
+	} else if summary != "" {
+		parts = append(parts, "// "+op.Name+" - "+summary)
+	} else if desc != "" {
+		descLines := commentLines(desc)
+		// Prefix the method name on the first line.
+		if len(descLines) > 0 {
+			descLines[0] = "// " + op.Name + " - " + strings.TrimPrefix(descLines[0], "// ")
+		}
+		parts = append(parts, descLines...)
+	}
+
+	if op.Deprecated {
+		if len(parts) > 0 {
+			parts = append(parts, "//")
+		}
+		parts = append(parts, "// Deprecated: this operation is deprecated.")
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n")
+}
+
+// fieldDocComment generates a Go doc comment for a struct field.
+// Includes description and a Deprecated marker if applicable.
+func fieldDocComment(f *ir.Field) string {
+	var parts []string
+	parts = append(parts, commentLines(f.Description)...)
+	if f.Deprecated {
+		if len(parts) > 0 {
+			parts = append(parts, "//")
+		}
+		parts = append(parts, "// Deprecated: this field is deprecated.")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n")
+}
+
+// paramDocComment generates a Go doc comment for a parameter struct field.
+// Includes description and a Deprecated marker if applicable.
+func paramDocComment(p *ir.ParamDef) string {
+	var parts []string
+	parts = append(parts, commentLines(p.Description)...)
+	if p.Deprecated {
+		if len(parts) > 0 {
+			parts = append(parts, "//")
+		}
+		parts = append(parts, "// Deprecated: this parameter is deprecated.")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n")
+}
+
+// indent prepends a tab character to each non-empty line of s.
+func indent(s string) string {
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = "\t" + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // jsonTag returns the JSON struct tag value for a field.

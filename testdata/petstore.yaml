@@ -10,6 +10,7 @@ paths:
     get:
       operationId: listPets
       summary: List all pets
+      description: Returns a paginated list of all pets in the store.
       parameters:
         - name: limit
           in: query
@@ -110,6 +111,7 @@ components:
   schemas:
     Pet:
       type: object
+      description: A pet in the store
       required:
         - id
         - name
@@ -117,47 +119,59 @@ components:
         id:
           type: integer
           format: int64
+          description: The unique identifier for the pet
         name:
           type: string
+          description: The display name of the pet
         tag:
           type:
             - string
             - "null"
+          description: An optional tag for categorization
         status:
           $ref: "#/components/schemas/PetStatus"
         createdAt:
           type: string
           format: date-time
+          description: When the pet was created
     PetStatus:
       type: string
+      description: The current status of the pet in the store
       enum:
         - available
         - pending
         - sold
     PetList:
       type: object
+      description: A paginated list of pets
       required:
         - items
       properties:
         items:
           type: array
+          description: The list of pets
           items:
             $ref: "#/components/schemas/Pet"
         nextCursor:
           type:
             - string
             - "null"
+          description: Cursor for the next page of results
     CreatePetRequest:
       type: object
+      description: Request body for creating a new pet
       required:
         - name
       properties:
         name:
           type: string
+          description: The name of the pet to create
         tag:
           type: string
+          description: An optional tag for the pet
     Error:
       type: object
+      description: An error response from the API
       required:
         - code
         - message
@@ -165,8 +179,10 @@ components:
         code:
           type: integer
           format: int32
+          description: The error code
         message:
           type: string
+          description: A human-readable error message
   securitySchemes:
     bearerAuth:
       type: http

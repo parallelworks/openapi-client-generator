@@ -3,6 +3,7 @@ package ir
 // OperationDef represents a single API operation.
 type OperationDef struct {
 	Name            string          // Go method name (e.g., "ListUsers")
+	Summary         string          // Short summary from the spec
 	Description     string
 	HTTPMethod      string          // "GET", "POST", etc.
 	Path            string          // URL path template (e.g., "/users/{id}")
@@ -29,6 +30,7 @@ type ParamDef struct {
 	Type        string // Go type expression
 	Required    bool
 	Description string
+	Deprecated  bool
 	Style       string // serialization style
 	Explode     bool
 }
