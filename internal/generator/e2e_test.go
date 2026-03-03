@@ -112,6 +112,58 @@ func TestE2E_PetstoreGeneration(t *testing.T) {
 		t.Fatalf("go build failed: %v\n%s", err, string(output))
 	}
 	t.Log("generated code compiles successfully")
+
+	// Verify doc comments appear in generated output.
+	var typesContent, opsContent string
+	for _, f := range files {
+		switch f.Name {
+		case "types.go":
+			typesContent = string(f.Content)
+		case "operations.go":
+			opsContent = string(f.Content)
+		}
+	}
+
+	// Type-level doc comments.
+	if !strings.Contains(typesContent, "// Pet - A pet in the store") {
+		t.Error("types.go missing Pet type doc comment")
+	}
+	if !strings.Contains(typesContent, "// PetStatus - The current status of the pet in the store") {
+		t.Error("types.go missing PetStatus type doc comment")
+	}
+	if !strings.Contains(typesContent, "// Error - An error response from the API") {
+		t.Error("types.go missing Error type doc comment")
+	}
+
+	// Field-level doc comments.
+	if !strings.Contains(typesContent, "// The unique identifier for the pet") {
+		t.Error("types.go missing Pet.id field description")
+	}
+	if !strings.Contains(typesContent, "// The display name of the pet") {
+		t.Error("types.go missing Pet.name field description")
+	}
+	if !strings.Contains(typesContent, "// A human-readable error message") {
+		t.Error("types.go missing Error.message field description")
+	}
+
+	// Operation doc comments (summary + description).
+	if !strings.Contains(opsContent, "// ListPets - List all pets") {
+		t.Error("operations.go missing ListPets doc comment")
+	}
+	if !strings.Contains(opsContent, "// Returns a paginated list of all pets in the store.") {
+		t.Error("operations.go missing ListPets description in doc comment")
+	}
+	if !strings.Contains(opsContent, "// CreatePet - Create a pet") {
+		t.Error("operations.go missing CreatePet doc comment")
+	}
+
+	// Parameter descriptions in params struct.
+	if !strings.Contains(opsContent, "// How many items to return at one time (max 100)") {
+		t.Error("operations.go missing limit param description in ListPetsParams")
+	}
+	if !strings.Contains(opsContent, "// Pagination cursor") {
+		t.Error("operations.go missing cursor param description in ListPetsParams")
+	}
 }
 
 func TestE2E_TextPlainGeneration(t *testing.T) {

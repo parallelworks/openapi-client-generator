@@ -152,12 +152,16 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 			}
 
 			td.Fields = append(td.Fields, &ir.Field{
-				Name:      naming.ToGoFieldName(propName),
-				JSONName:  propName,
-				Type:      goType,
-				Required:  required,
-				IsPointer: isPointer,
-				OmitEmpty: !required,
+				Name:        naming.ToGoFieldName(propName),
+				JSONName:    propName,
+				Type:        goType,
+				Description: propSchema.Description,
+				Required:    required,
+				IsPointer:   isPointer,
+				OmitEmpty:   !required,
+				Deprecated:  propSchema.Deprecated != nil && *propSchema.Deprecated,
+				ReadOnly:    propSchema.ReadOnly != nil && *propSchema.ReadOnly,
+				WriteOnly:   propSchema.WriteOnly != nil && *propSchema.WriteOnly,
 			})
 		}
 	}
@@ -279,14 +283,16 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 		}
 
 		td.Fields = append(td.Fields, &ir.Field{
-			Name:      naming.ToGoFieldName(propName),
-			JSONName:  propName,
-			Type:      goType,
-			Required:  required,
-			IsPointer: isPointer,
-			OmitEmpty: !required,
-			ReadOnly:  schema.ReadOnly != nil && *schema.ReadOnly,
-			WriteOnly: schema.WriteOnly != nil && *schema.WriteOnly,
+			Name:        naming.ToGoFieldName(propName),
+			JSONName:    propName,
+			Type:        goType,
+			Description: propSchema.Description,
+			Required:    required,
+			IsPointer:   isPointer,
+			OmitEmpty:   !required,
+			Deprecated:  propSchema.Deprecated != nil && *propSchema.Deprecated,
+			ReadOnly:    propSchema.ReadOnly != nil && *propSchema.ReadOnly,
+			WriteOnly:   propSchema.WriteOnly != nil && *propSchema.WriteOnly,
 		})
 	}
 

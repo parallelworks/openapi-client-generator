@@ -11,19 +11,22 @@ import (
 )
 
 {{ range .Types }}
-{{ if .Description }}// {{ .Name }} - {{ cleanDoc .Description }}{{ end }}
-{{ if eq .Kind 0 }}type {{ .Name }} struct {
-{{ range .Fields }}{{ if .Description }}	// {{ cleanDoc .Description }}
+{{ $typeDoc := typeDocComment . }}{{ if eq .Kind 0 }}{{ if $typeDoc }}{{ $typeDoc }}
+{{ end }}type {{ .Name }} struct {
+{{ range .Fields }}{{ $fDoc := fieldDocComment . }}{{ if $fDoc }}{{ indent $fDoc }}
 {{ end }}{{ if .Embedded }}	{{ .Type }}
 {{ else }}	{{ .Name }} {{ .Type }} `json:"{{ jsonTag . }}"`
 {{ end }}{{ end }}}
-{{ else if eq .Kind 1 }}type {{ .Name }} = {{ .GoType }}
-{{ else if eq .Kind 2 }}{{ $typeName := .Name }}type {{ .Name }} {{ .EnumGoType }}
+{{ else if eq .Kind 1 }}{{ if $typeDoc }}{{ $typeDoc }}
+{{ end }}type {{ .Name }} = {{ .GoType }}
+{{ else if eq .Kind 2 }}{{ $typeName := .Name }}{{ if $typeDoc }}{{ $typeDoc }}
+{{ end }}type {{ .Name }} {{ .EnumGoType }}
 
 const (
 {{ range .EnumValues }}	{{ .Name }} {{ $typeName }} = {{ enumLiteral . }}
 {{ end }})
-{{ else if eq .Kind 3 }}{{ $typeName := .Name }}// {{ .Name }} represents a union type (oneOf/anyOf).
+{{ else if eq .Kind 3 }}{{ $typeName := .Name }}{{ if $typeDoc }}{{ $typeDoc }}
+{{ else }}// {{ .Name }} represents a union type (oneOf/anyOf).{{ end }}
 // Variants: {{ range $i, $v := .UnionTypes }}{{ if $i }}, {{ end }}{{ $v.TypeName }}{{ end }}
 type {{ .Name }} struct {
 	Value any

@@ -46,6 +46,12 @@ func TestAnalyzeOperations_Petstore(t *testing.T) {
 	if listPets.Path != "/pets" {
 		t.Errorf("ListPets.Path = %q, want /pets", listPets.Path)
 	}
+	if listPets.Summary != "List all pets" {
+		t.Errorf("ListPets.Summary = %q, want %q", listPets.Summary, "List all pets")
+	}
+	if listPets.Description != "Returns a paginated list of all pets in the store." {
+		t.Errorf("ListPets.Description = %q, want %q", listPets.Description, "Returns a paginated list of all pets in the store.")
+	}
 	if len(listPets.QueryParams) != 2 {
 		t.Errorf("ListPets: expected 2 query params, got %d", len(listPets.QueryParams))
 	} else {
@@ -57,6 +63,9 @@ func TestAnalyzeOperations_Petstore(t *testing.T) {
 		}
 		if listPets.QueryParams[0].Required {
 			t.Error("ListPets limit param should not be required")
+		}
+		if listPets.QueryParams[0].Description != "How many items to return at one time (max 100)" {
+			t.Errorf("ListPets limit param Description = %q, want %q", listPets.QueryParams[0].Description, "How many items to return at one time (max 100)")
 		}
 		if listPets.QueryParams[1].OrigName != "cursor" {
 			t.Errorf("ListPets.QueryParams[1].OrigName = %q, want cursor", listPets.QueryParams[1].OrigName)
