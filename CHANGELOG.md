@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.2...v0.1.3) (2026-03-03)
+
+
+### Bug Fixes
+
+* codegen header is package doc comment ([#9](https://github.com/parallelworks/openapi-client-generator/issues/9)) ([06aadff](https://github.com/parallelworks/openapi-client-generator/commit/06aadffa1a078017240c82a33ad69e55009fa150))
+
 ## [0.1.2](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.1...v0.1.2) (2026-03-02)
 
 
