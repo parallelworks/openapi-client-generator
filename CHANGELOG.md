@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.4...v0.1.5) (2026-03-03)
+
+
+### Bug Fixes
+
+* query params incorrectly generated ([#13](https://github.com/parallelworks/openapi-client-generator/issues/13)) ([bb5c85f](https://github.com/parallelworks/openapi-client-generator/commit/bb5c85f0835b6dbd8b34240b553c0b006a8e338d))
+
 ## [0.1.4](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.3...v0.1.4) (2026-03-03)
 
 
