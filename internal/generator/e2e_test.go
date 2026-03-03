@@ -346,3 +346,122 @@ func TestE2E_HeaderParamsGeneration(t *testing.T) {
 
 	t.Log("header params generated code compiles successfully")
 }
+
+func TestE2E_AddQueryParamPointerTypes(t *testing.T) {
+	specPath := filepath.Join(projectRoot(), "testdata", "petstore.yaml")
+
+	result, err := parser.Parse(specPath, parser.Config{})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	a := analyzer.New(result.Model)
+	pkg, err := a.Analyze("petstore")
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+
+	gen, err := New(pkg)
+	if err != nil {
+		t.Fatalf("New generator: %v", err)
+	}
+
+	files, err := gen.Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+
+	goMod := []byte("module petstore-queryparams-test\n\ngo 1.25.5\n")
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), goMod, 0o644); err != nil {
+		t.Fatalf("writing go.mod: %v", err)
+	}
+
+	if err := WriteFiles(tmpDir, files); err != nil {
+		t.Fatalf("WriteFiles: %v", err)
+	}
+
+	// Write a test file that exercises addQueryParam with pointer types.
+	testCode := []byte(`package petstore
+
+import (
+	"net/url"
+	"testing"
+)
+
+func ptr[T any](v T) *T { return &v }
+
+func TestAddQueryParam_PointerString(t *testing.T) {
+	values := url.Values{}
+	addQueryParam(values, "name", ptr("hello"))
+	if got := values.Get("name"); got != "hello" {
+		t.Errorf("expected %q, got %q", "hello", got)
+	}
+}
+
+func TestAddQueryParam_PointerInt(t *testing.T) {
+	values := url.Values{}
+	addQueryParam(values, "limit", ptr(int32(42)))
+	if got := values.Get("limit"); got != "42" {
+		t.Errorf("expected %q, got %q", "42", got)
+	}
+}
+
+func TestAddQueryParam_NilStringPointer(t *testing.T) {
+	values := url.Values{}
+	var s *string
+	addQueryParam(values, "name", s)
+	if values.Has("name") {
+		t.Errorf("expected no param, got %q", values.Get("name"))
+	}
+}
+
+func TestAddQueryParam_NilIntPointer(t *testing.T) {
+	values := url.Values{}
+	var n *int32
+	addQueryParam(values, "limit", n)
+	if values.Has("limit") {
+		t.Errorf("expected no param, got %q", values.Get("limit"))
+	}
+}
+
+func TestAddQueryParam_UntypedNil(t *testing.T) {
+	values := url.Values{}
+	addQueryParam(values, "key", nil)
+	if values.Has("key") {
+		t.Errorf("expected no param, got %q", values.Get("key"))
+	}
+}
+
+func TestAddQueryParam_NonPointerString(t *testing.T) {
+	values := url.Values{}
+	addQueryParam(values, "name", "world")
+	if got := values.Get("name"); got != "world" {
+		t.Errorf("expected %q, got %q", "world", got)
+	}
+}
+
+func TestAddQueryParam_NonPointerInt(t *testing.T) {
+	values := url.Values{}
+	addQueryParam(values, "count", int32(7))
+	if got := values.Get("count"); got != "7" {
+		t.Errorf("expected %q, got %q", "7", got)
+	}
+}
+`)
+	if err := os.WriteFile(filepath.Join(tmpDir, "helpers_test.go"), testCode, 0o644); err != nil {
+		t.Fatalf("writing helpers_test.go: %v", err)
+	}
+
+	cmd := exec.Command("go", "test", "./...")
+	cmd.Dir = tmpDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		for _, f := range files {
+			t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
+		}
+		t.Fatalf("go test failed: %v\n%s", err, string(output))
+	}
+	t.Logf("addQueryParam pointer tests passed:\n%s", string(output))
+}

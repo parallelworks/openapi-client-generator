@@ -5,6 +5,7 @@ package {{ .Name }}
 import (
 	"fmt"
 	"net/url"
+	"reflect"
 	"strings"
 )
 
@@ -14,9 +15,18 @@ func pathReplace(path, param string, value any) string {
 }
 
 // addQueryParam adds a non-zero-value query parameter.
+// It handles pointer types by dereferencing them before formatting.
 func addQueryParam(values url.Values, key string, value any) {
 	if value == nil {
 		return
+	}
+	// Dereference pointer types to get the underlying value.
+	rv := reflect.ValueOf(value)
+	if rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return
+		}
+		value = rv.Elem().Interface()
 	}
 	s := fmt.Sprintf("%v", value)
 	if s != "" && s != "0" && s != "false" {
