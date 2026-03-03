@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.3...v0.1.4) (2026-03-03)
+
+
+### Features
+
+* extract OpenAPI docs into Go doc comments ([#11](https://github.com/parallelworks/openapi-client-generator/issues/11)) ([39957df](https://github.com/parallelworks/openapi-client-generator/commit/39957dfb95ac2800935cf4a8ba850a8a3224d716))
+
 ## [0.1.3](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.2...v0.1.3) (2026-03-03)
 
 
