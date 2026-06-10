@@ -788,6 +788,7 @@ func TestComplexSchemas_AllTypesPresent(t *testing.T) {
 		"Animal", "Dog", "Circle", "Rectangle", "Shape",
 		"StringOrInt", "Metadata", "Labels", "Config",
 		"DogOrCircle", "Timestamped", "TimestampedDog",
+		"ShapeCollection", "ShapeCollectionShapesValue",
 	}
 
 	if len(pkg.Types) != len(expectedTypes) {

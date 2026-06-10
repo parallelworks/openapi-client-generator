@@ -160,7 +160,7 @@ func (a *Analyzer) convertParam(param *v3high.Parameter) (*ir.ParamDef, error) {
 			return nil, fmt.Errorf("building param schema: %w", err)
 		}
 		if schema != nil {
-			goType = a.resolveGoType(schema)
+			goType = a.resolveGoType(schema, "")
 		}
 	}
 
@@ -299,7 +299,7 @@ func (a *Analyzer) resolveMediaTypeSchema(mt *v3high.MediaType) string {
 	if err != nil || schema == nil {
 		return ""
 	}
-	return a.resolveGoType(schema)
+	return a.resolveGoType(schema, "")
 }
 
 // convertSecurityReqs converts OpenAPI security requirements to IR.

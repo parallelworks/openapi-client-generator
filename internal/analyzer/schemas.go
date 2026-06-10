@@ -3,6 +3,7 @@ package analyzer
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	highbase "github.com/pb33f/libopenapi/datamodel/high/base"
 
@@ -144,7 +145,7 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 
 			required := requiredSet[propName]
 			propNullable := isNullable(propSchema)
-			goType := a.resolveGoType(propSchema)
+			goType := a.resolveGoType(propSchema, goName+naming.ToGoFieldName(propName))
 			isPointer := !required || propNullable
 
 			if isPointer && goType != "any" && !isSliceType(goType) && !isMapType(goType) {
@@ -275,7 +276,7 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 
 		required := requiredSet[propName]
 		propNullable := isNullable(propSchema)
-		goType := a.resolveGoType(propSchema)
+		goType := a.resolveGoType(propSchema, goName+naming.ToGoFieldName(propName))
 		isPointer := !required || propNullable
 
 		if isPointer && goType != "any" && !isSliceType(goType) && !isMapType(goType) {
@@ -298,7 +299,7 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 
 	// If the object has both properties and additionalProperties, add an extra field.
 	if schema.AdditionalProperties != nil {
-		mapValueType := a.resolveAdditionalPropertiesType(schema)
+		mapValueType := a.resolveAdditionalPropertiesType(schema, goName)
 		td.Fields = append(td.Fields, &ir.Field{
 			Name:      "AdditionalProperties",
 			JSONName:  "-",
@@ -313,7 +314,7 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 // convertAdditionalPropertiesMap creates a map alias when an object has
 // additionalProperties but no defined properties.
 func (a *Analyzer) convertAdditionalPropertiesMap(goName string, schema *highbase.Schema, nullable bool) (*ir.TypeDef, error) {
-	mapValueType := a.resolveAdditionalPropertiesType(schema)
+	mapValueType := a.resolveAdditionalPropertiesType(schema, goName)
 	return &ir.TypeDef{
 		Name:        goName,
 		Description: schema.Description,
@@ -324,7 +325,7 @@ func (a *Analyzer) convertAdditionalPropertiesMap(goName string, schema *highbas
 }
 
 // resolveAdditionalPropertiesType returns the Go value type for additionalProperties.
-func (a *Analyzer) resolveAdditionalPropertiesType(schema *highbase.Schema) string {
+func (a *Analyzer) resolveAdditionalPropertiesType(schema *highbase.Schema, nameHint string) string {
 	ap := schema.AdditionalProperties
 	if ap == nil {
 		return "any"
@@ -337,7 +338,7 @@ func (a *Analyzer) resolveAdditionalPropertiesType(schema *highbase.Schema) stri
 	if ap.IsA() && ap.A != nil {
 		apSchema, err := ap.A.BuildSchema()
 		if err == nil && apSchema != nil {
-			return a.resolveGoType(apSchema)
+			return a.resolveGoType(apSchema, suffixHint(nameHint, "Value"))
 		}
 	}
 	return "any"
@@ -352,7 +353,7 @@ func (a *Analyzer) convertArray(goName string, schema *highbase.Schema, nullable
 			return nil, fmt.Errorf("building array items schema: %w", err)
 		}
 		if itemSchema != nil {
-			elemType = a.resolveGoType(itemSchema)
+			elemType = a.resolveGoType(itemSchema, suffixHint(goName, "Item"))
 		}
 	}
 
@@ -379,8 +380,10 @@ func (a *Analyzer) convertPrimitive(goName, primaryType string, schema *highbase
 }
 
 // resolveGoType determines the Go type expression for a schema, handling refs
-// to known types, arrays, and primitives.
-func (a *Analyzer) resolveGoType(schema *highbase.Schema) string {
+// to known types, arrays, primitives, and inline unions. nameHint carries the
+// naming context (parent type + field) used when a type must be synthesized;
+// pass "" when no context is available.
+func (a *Analyzer) resolveGoType(schema *highbase.Schema, nameHint string) string {
 	// Check if this schema is a $ref pointing to a known component schema.
 	if schema.ParentProxy != nil {
 		ref := schema.ParentProxy.GetReference()
@@ -396,13 +399,21 @@ func (a *Analyzer) resolveGoType(schema *highbase.Schema) string {
 		}
 	}
 
+	// Inline oneOf/anyOf: synthesize a named union so $ref variants stay typed.
+	if name, ok := a.synthesizeInlineUnion(schema, nameHint); ok {
+		return name
+	}
+
 	// Enum type referenced inline -- use the primary type.
 	primaryType := primaryType(schema)
 
 	switch primaryType {
 	case "object":
-		// Inline objects without properties -> map[string]any.
+		// Inline objects without properties -> a map of the additionalProperties type.
 		if schema.Properties == nil || schema.Properties.Len() == 0 {
+			if schema.AdditionalProperties != nil {
+				return "map[string]" + a.resolveAdditionalPropertiesType(schema, nameHint)
+			}
 			return "map[string]any"
 		}
 		// Complex inline object -- for now use any. Full support would create
@@ -413,7 +424,7 @@ func (a *Analyzer) resolveGoType(schema *highbase.Schema) string {
 		if schema.Items != nil && schema.Items.IsA() {
 			itemSchema, _ := schema.Items.A.BuildSchema()
 			if itemSchema != nil {
-				elemType = a.resolveGoType(itemSchema)
+				elemType = a.resolveGoType(itemSchema, suffixHint(nameHint, "Item"))
 			}
 		}
 		return "[]" + elemType
@@ -422,6 +433,63 @@ func (a *Analyzer) resolveGoType(schema *highbase.Schema) string {
 	default:
 		return "any"
 	}
+}
+
+// synthesizeInlineUnion creates a named union TypeDef for an inline
+// oneOf/anyOf schema so its $ref variants keep their generated types instead
+// of degrading to any. Identical unions (same variants and discriminator) are
+// synthesized once and reuse the first occurrence's name; the resulting types
+// are emitted after the component schemas. Returns false when the schema is
+// not a union, has no $ref variants worth naming, or no nameHint is available.
+func (a *Analyzer) synthesizeInlineUnion(schema *highbase.Schema, nameHint string) (string, bool) {
+	variants := schema.OneOf
+	kind := "oneOf"
+	if len(variants) == 0 {
+		variants = schema.AnyOf
+		kind = "anyOf"
+	}
+	if len(variants) == 0 || nameHint == "" {
+		return "", false
+	}
+
+	refs := make([]string, 0, len(variants))
+	hasRef := false
+	for _, proxy := range variants {
+		ref := proxy.GetReference()
+		if ref != "" {
+			hasRef = true
+		}
+		refs = append(refs, ref)
+	}
+	if !hasRef {
+		return "", false
+	}
+
+	key := kind + "|" + strings.Join(refs, ",")
+	if schema.Discriminator != nil {
+		key += "|" + schema.Discriminator.PropertyName
+	}
+	if existing, ok := a.synthesizedByKey[key]; ok {
+		return existing.Name, true
+	}
+
+	goName := a.namer.RegisterName(naming.ToGoName(nameHint))
+	td, err := a.convertUnion(goName, schema, variants, isNullable(schema))
+	if err != nil {
+		return "", false
+	}
+	a.synthesizedByKey[key] = td
+	a.synthesized = append(a.synthesized, td)
+	return goName, true
+}
+
+// suffixHint appends a suffix to a naming hint, preserving emptiness so that
+// hintless contexts stay hintless.
+func suffixHint(nameHint, suffix string) string {
+	if nameHint == "" {
+		return ""
+	}
+	return nameHint + suffix
 }
 
 // primaryType extracts the primary (non-null) type from the schema's Type array.
