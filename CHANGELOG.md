@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.5...v0.1.6) (2026-06-10)
+
+
+### Features
+
+* typed discriminated unions for inline oneOf/anyOf schemas ([#18](https://github.com/parallelworks/openapi-client-generator/issues/18)) ([3b276de](https://github.com/parallelworks/openapi-client-generator/commit/3b276decfe67f2753331678602848061af538e45))
+
 ## [0.1.5](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.4...v0.1.5) (2026-03-03)
 
 
