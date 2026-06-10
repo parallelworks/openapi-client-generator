@@ -134,3 +134,32 @@ components:
           properties:
             registrationId:
               type: string
+
+    # --- inline discriminated oneOf under additionalProperties ---
+    ShapeCollection:
+      type: object
+      required:
+        - shapes
+      properties:
+        shapes:
+          type: object
+          additionalProperties:
+            oneOf:
+              - $ref: "#/components/schemas/Circle"
+              - $ref: "#/components/schemas/Rectangle"
+            discriminator:
+              propertyName: shapeType
+              mapping:
+                circle: "#/components/schemas/Circle"
+                rectangle: "#/components/schemas/Rectangle"
+        backupShapes:
+          type: object
+          additionalProperties:
+            oneOf:
+              - $ref: "#/components/schemas/Circle"
+              - $ref: "#/components/schemas/Rectangle"
+            discriminator:
+              propertyName: shapeType
+              mapping:
+                circle: "#/components/schemas/Circle"
+                rectangle: "#/components/schemas/Rectangle"

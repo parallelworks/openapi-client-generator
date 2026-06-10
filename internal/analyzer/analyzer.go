@@ -15,14 +15,19 @@ type Analyzer struct {
 	namer *naming.Namer
 	// typesBySchema tracks already-converted schema names to avoid duplicates.
 	typesBySchema map[string]*ir.TypeDef
+	// synthesized holds union types created for inline oneOf/anyOf schemas,
+	// deduplicated on their variant set and discriminator.
+	synthesized      []*ir.TypeDef
+	synthesizedByKey map[string]*ir.TypeDef
 }
 
 // New creates an Analyzer for the given high-level OpenAPI model.
 func New(model *v3high.Document) *Analyzer {
 	return &Analyzer{
-		model:         model,
-		namer:         naming.NewNamer(),
-		typesBySchema: make(map[string]*ir.TypeDef),
+		model:            model,
+		namer:            naming.NewNamer(),
+		typesBySchema:    make(map[string]*ir.TypeDef),
+		synthesizedByKey: make(map[string]*ir.TypeDef),
 	}
 }
 
@@ -62,6 +67,9 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 	if err := a.analyzeSecuritySchemes(pkg); err != nil {
 		return nil, err
 	}
+
+	// Append union types synthesized for inline oneOf/anyOf schemas.
+	pkg.Types = append(pkg.Types, a.synthesized...)
 
 	// Detect paginated operations.
 	a.detectPagination(pkg)
