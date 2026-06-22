@@ -112,7 +112,17 @@ func (c *Client) do(ctx context.Context, method string, path string, body any, r
 {{ end }}
 		resp, err := transport(req)
 		if err != nil {
-			// Network errors are not retryable.
+			// Retry idempotent requests on transient network errors (connection reset, timeout, EOF).
+			if c.retryConfig != nil && attempt < maxAttempts-1 && isIdempotentMethod(method) && isRetryableNetworkError(err) {
+				timer := time.NewTimer(retryDelay(attempt, *c.retryConfig, nil))
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return ctx.Err()
+				case <-timer.C:
+				}
+				continue
+			}
 			return fmt.Errorf("executing request: %w", err)
 		}
 

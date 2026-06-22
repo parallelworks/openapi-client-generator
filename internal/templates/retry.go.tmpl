@@ -3,8 +3,12 @@
 package {{ .Name }}
 
 import (
+	"context"
+	"errors"
+	"io"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -82,4 +86,30 @@ func retryDelay(attempt int, cfg RetryConfig, resp *http.Response) time.Duration
 	delay = (delay + jitter) / 2
 
 	return time.Duration(delay)
+}
+
+// isIdempotentMethod reports whether method is safe to retry after a transient
+// network error. Non-idempotent methods (e.g. POST) are excluded because a reset
+// connection leaves the server's state unknown and retrying may duplicate effects.
+func isIdempotentMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodPut, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+// isRetryableNetworkError reports whether err is a transient transport-level
+// failure (connection reset/refused, timeout, unexpected EOF) worth retrying.
+func isRetryableNetworkError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	// net.Error matches both *net.OpError (reset/refused) and *url.Error (timeout).
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
