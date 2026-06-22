@@ -989,3 +989,61 @@ func TestGenerate_ParamDescriptions(t *testing.T) {
 		t.Error("output missing limit param description")
 	}
 }
+
+func TestGenerate_RetriesTransientNetworkErrors(t *testing.T) {
+	pkg := &ir.Package{
+		Name: "testpkg",
+		Types: []*ir.TypeDef{
+			{
+				Name: "Simple",
+				Kind: ir.TypeKindStruct,
+				Fields: []*ir.Field{
+					{Name: "Value", JSONName: "value", Type: "string", Required: true},
+				},
+			},
+		},
+	}
+
+	gen, err := New(pkg)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	files, err := gen.Generate()
+	if err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+
+	var clientContent, retryContent string
+	for _, f := range files {
+		switch f.Name {
+		case "client.go":
+			clientContent = string(f.Content)
+		case "retry.go":
+			retryContent = string(f.Content)
+		}
+	}
+	if clientContent == "" {
+		t.Fatal("expected client.go in generated files")
+	}
+	if retryContent == "" {
+		t.Fatal("expected retry.go in generated files")
+	}
+
+	// retry.go must define the transient-network-error helpers.
+	if !strings.Contains(retryContent, "func isIdempotentMethod(method string) bool") {
+		t.Error("retry.go missing isIdempotentMethod helper")
+	}
+	if !strings.Contains(retryContent, "func isRetryableNetworkError(err error) bool") {
+		t.Error("retry.go missing isRetryableNetworkError helper")
+	}
+
+	// client.go must retry idempotent requests on transient network errors
+	// rather than returning immediately.
+	if !strings.Contains(clientContent, "isIdempotentMethod(method) && isRetryableNetworkError(err)") {
+		t.Error("client.go missing network-error retry path")
+	}
+	if strings.Contains(clientContent, "// Network errors are not retryable.") {
+		t.Error("client.go still treats all network errors as non-retryable")
+	}
+}

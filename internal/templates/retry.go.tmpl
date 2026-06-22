@@ -3,8 +3,12 @@
 package {{ .Name }}
 
 import (
+	"context"
+	"errors"
+	"io"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -82,4 +86,32 @@ func retryDelay(attempt int, cfg RetryConfig, resp *http.Response) time.Duration
 	delay = (delay + jitter) / 2
 
 	return time.Duration(delay)
+}
+
+// isIdempotentMethod reports whether method is safe to retry after a transient network error (POST is not).
+func isIdempotentMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodPut, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+// isRetryableNetworkError reports whether err is a transient transport failure worth retrying.
+func isRetryableNetworkError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	// Don't use a bare net.Error check: *url.Error always satisfies it, so it would
+	// also retry non-transient failures (TLS, bad URL). Match a real timeout or socket error.
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr)
 }
