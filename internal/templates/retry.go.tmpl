@@ -88,9 +88,7 @@ func retryDelay(attempt int, cfg RetryConfig, resp *http.Response) time.Duration
 	return time.Duration(delay)
 }
 
-// isIdempotentMethod reports whether method is safe to retry after a transient
-// network error. Non-idempotent methods (e.g. POST) are excluded because a reset
-// connection leaves the server's state unknown and retrying may duplicate effects.
+// isIdempotentMethod reports whether method is safe to retry after a transient network error (POST is not).
 func isIdempotentMethod(method string) bool {
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodPut, http.MethodDelete:
@@ -100,8 +98,7 @@ func isIdempotentMethod(method string) bool {
 	}
 }
 
-// isRetryableNetworkError reports whether err is a transient transport-level
-// failure (connection reset/refused, timeout, unexpected EOF) worth retrying.
+// isRetryableNetworkError reports whether err is a transient transport failure worth retrying.
 func isRetryableNetworkError(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
@@ -109,7 +106,12 @@ func isRetryableNetworkError(err error) bool {
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
-	// net.Error matches both *net.OpError (reset/refused) and *url.Error (timeout).
+	// Don't use a bare net.Error check: *url.Error always satisfies it, so it would
+	// also retry non-transient failures (TLS, bad URL). Match a real timeout or socket error.
 	var netErr net.Error
-	return errors.As(err, &netErr)
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr)
 }
