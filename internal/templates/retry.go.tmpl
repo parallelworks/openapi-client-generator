@@ -64,6 +64,15 @@ func shouldRetry(statusCode int, cfg RetryConfig) bool {
 	return false
 }
 
+// shouldRetryStatus reports whether a response with statusCode should be retried for method.
+func shouldRetryStatus(method string, statusCode int, cfg RetryConfig) bool {
+	if !shouldRetry(statusCode, cfg) {
+		return false
+	}
+	// Non-idempotent methods are only safe to retry on 429 (the request was not processed).
+	return isIdempotentMethod(method) || statusCode == http.StatusTooManyRequests
+}
+
 // retryDelay calculates delay with exponential backoff, jitter, and Retry-After support.
 func retryDelay(attempt int, cfg RetryConfig, resp *http.Response) time.Duration {
 	// Check Retry-After header first.

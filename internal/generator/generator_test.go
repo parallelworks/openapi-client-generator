@@ -1046,4 +1046,16 @@ func TestGenerate_RetriesTransientNetworkErrors(t *testing.T) {
 	if strings.Contains(clientContent, "// Network errors are not retryable.") {
 		t.Error("client.go still treats all network errors as non-retryable")
 	}
+
+	// Status-code retries must be gated by method so non-idempotent requests
+	// (POST/PATCH) aren't replayed on 5xx.
+	if !strings.Contains(retryContent, "func shouldRetryStatus(method string, statusCode int, cfg RetryConfig) bool") {
+		t.Error("retry.go missing shouldRetryStatus helper")
+	}
+	if !strings.Contains(clientContent, "shouldRetryStatus(method, resp.StatusCode, *c.retryConfig)") {
+		t.Error("client.go status-retry not gated by method")
+	}
+	if strings.Contains(clientContent, "shouldRetry(resp.StatusCode, *c.retryConfig)") {
+		t.Error("client.go still retries all methods on retryable status codes")
+	}
 }
