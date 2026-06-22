@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.6...v0.1.7) (2026-06-22)
+
+
+### Bug Fixes
+
+* retry idempotent requests on transient network errors ([#20](https://github.com/parallelworks/openapi-client-generator/issues/20)) ([b91321e](https://github.com/parallelworks/openapi-client-generator/commit/b91321ed5f444c14f03f296c37150c158c681df4))
+
 ## [0.1.6](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.5...v0.1.6) (2026-06-10)
 
 
