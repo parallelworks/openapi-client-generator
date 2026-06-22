@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.7...v0.1.8) (2026-06-22)
+
+
+### Bug Fixes
+
+* retries can duplicate non-idempotent requests on 5xx ([#22](https://github.com/parallelworks/openapi-client-generator/issues/22)) ([907a739](https://github.com/parallelworks/openapi-client-generator/commit/907a73910eca307d38e54cd0fa13566271b7b761))
+
 ## [0.1.7](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.6...v0.1.7) (2026-06-22)
 
 
