@@ -12,30 +12,31 @@ import (
 // FuncMap returns the template.FuncMap used by all templates.
 func FuncMap() template.FuncMap {
 	return template.FuncMap{
-		"cleanDoc":               cleanDoc,
-		"opDocComment":           opDocComment,
-		"typeDocComment":         typeDocComment,
-		"fieldDocComment":        fieldDocComment,
-		"paramDocComment":        paramDocComment,
-		"indent":                 indent,
-		"jsonTag":                jsonTag,
-		"enumLiteral":            enumLiteral,
-		"hasOperations":          hasOperations,
-		"successType":            successType,
-		"hasBody":                hasBody,
-		"hasOptionalParams":      hasOptionalParams,
+		"cleanDoc":                cleanDoc,
+		"opDocComment":            opDocComment,
+		"typeDocComment":          typeDocComment,
+		"fieldDocComment":         fieldDocComment,
+		"paramDocComment":         paramDocComment,
+		"indent":                  indent,
+		"jsonTag":                 jsonTag,
+		"enumLiteral":             enumLiteral,
+		"hasOperations":           hasOperations,
+		"successType":             successType,
+		"hasBody":                 hasBody,
+		"hasOptionalParams":       hasOptionalParams,
 		"hasOptionalQueryParams":  hasOptionalQueryParams,
+		"hasRequiredQueryParams":  hasRequiredQueryParams,
 		"hasOptionalHeaderParams": hasOptionalHeaderParams,
-		"paramType":              paramType,
-		"hasUnions":              hasUnions,
-		"discriminatorFieldName": discriminatorFieldName,
-		"hasPaginatedOps":        hasPaginatedOps,
-		"paginationItemType":     paginationItemType,
-		"paginationCursorField":  paginationCursorField,
-		"toGoName":               naming.ToGoName,
-		"uniqueErrorTypes":       uniqueErrorTypes,
-		"errorType":              errorType,
-		"successContentType":     successContentType,
+		"paramType":               paramType,
+		"hasUnions":               hasUnions,
+		"discriminatorFieldName":  discriminatorFieldName,
+		"hasPaginatedOps":         hasPaginatedOps,
+		"paginationItemType":      paginationItemType,
+		"paginationCursorField":   paginationCursorField,
+		"toGoName":                naming.ToGoName,
+		"uniqueErrorTypes":        uniqueErrorTypes,
+		"errorType":               errorType,
+		"successContentType":      successContentType,
 	}
 }
 
@@ -226,6 +227,18 @@ func hasOptionalParams(op *ir.OperationDef) bool {
 func hasOptionalQueryParams(op *ir.OperationDef) bool {
 	for _, p := range op.QueryParams {
 		if !p.Required {
+			return true
+		}
+	}
+	return false
+}
+
+// hasRequiredQueryParams returns true if the operation has required query parameters.
+// These are emitted as positional method arguments (like path params) so callers
+// must supply them; otherwise the server rejects the request as missing a required param.
+func hasRequiredQueryParams(op *ir.OperationDef) bool {
+	for _, p := range op.QueryParams {
+		if p.Required {
 			return true
 		}
 	}
