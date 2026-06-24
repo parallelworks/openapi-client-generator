@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.8...v0.1.9) (2026-06-24)
+
+
+### Bug Fixes
+
+* emit required query parameters as positional arguments ([#24](https://github.com/parallelworks/openapi-client-generator/issues/24)) ([629f442](https://github.com/parallelworks/openapi-client-generator/commit/629f4427caf538e125b91b5fea3eafe4e7b590da))
+
 ## [0.1.8](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.7...v0.1.8) (2026-06-22)
 
 
