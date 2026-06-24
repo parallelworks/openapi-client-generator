@@ -20,23 +20,25 @@ type {{ .Name }}Params struct {
 {{ end }}{{ end }}}
 {{ end }}
 {{ $opDoc := opDocComment . }}{{ if $opDoc }}{{ $opDoc }}
-{{ end }}func (c *Client) {{ .Name }}(ctx context.Context{{ range .PathParams }}, {{ .Name }} {{ .Type }}{{ end }}{{ if hasBody . }}, body {{ if .RequestBody }}{{ if not .RequestBody.Required }}*{{ end }}{{ .RequestBody.TypeName }}{{ else }}any{{ end }}{{ end }}{{ if hasOptionalParams . }}, opts ...{{ .Name }}Params{{ end }}) {{ if successType . }}(*{{ successType . }}, error){{ else }}error{{ end }} {
+{{ end }}func (c *Client) {{ .Name }}(ctx context.Context{{ range .PathParams }}, {{ .Name }} {{ .Type }}{{ end }}{{ range .QueryParams }}{{ if .Required }}, {{ .Name }} {{ .Type }}{{ end }}{{ end }}{{ if hasBody . }}, body {{ if .RequestBody }}{{ if not .RequestBody.Required }}*{{ end }}{{ .RequestBody.TypeName }}{{ else }}any{{ end }}{{ end }}{{ if hasOptionalParams . }}, opts ...{{ .Name }}Params{{ end }}) {{ if successType . }}(*{{ successType . }}, error){{ else }}error{{ end }} {
 	path := "{{ .Path }}"
 {{ range .PathParams }}	path = pathReplace(path, "{{ .OrigName }}", {{ .Name }})
 {{ end }}
-{{ if hasOptionalParams . }}{{- $hasQuery := hasOptionalQueryParams . }}{{- $hasHeader := hasOptionalHeaderParams . }}{{ if $hasHeader }}	var headers http.Header
+{{- $hasReqQuery := hasRequiredQueryParams . }}{{- $hasOptQuery := hasOptionalQueryParams . }}{{- $hasOptHeader := hasOptionalHeaderParams . }}
+{{ if or $hasReqQuery $hasOptQuery }}	queryValues := url.Values{}
+{{ range .QueryParams }}{{ if .Required }}	addQueryParam(queryValues, "{{ .OrigName }}", {{ .Name }})
+{{ end }}{{ end }}{{ end }}{{ if hasOptionalParams . }}{{ if $hasOptHeader }}	var headers http.Header
 {{ end }}	if len(opts) > 0 {
 		params := opts[0]
-{{ if $hasQuery }}		queryValues := url.Values{}
 {{ range .QueryParams }}{{ if not .Required }}		addQueryParam(queryValues, "{{ .OrigName }}", params.{{ .FieldName }})
-{{ end }}{{ end }}		if len(queryValues) > 0 {
-			path += "?" + queryValues.Encode()
-		}
-{{ end }}{{ if $hasHeader }}		headers = make(http.Header)
+{{ end }}{{ end }}{{ if $hasOptHeader }}		headers = make(http.Header)
 {{ range .HeaderParams }}{{ if not .Required }}		if params.{{ .FieldName }} != nil {
 			headers.Set("{{ .OrigName }}", fmt.Sprintf("%v", *params.{{ .FieldName }}))
 		}
 {{ end }}{{ end }}{{ end }}	}
+{{ end }}{{ if or $hasReqQuery $hasOptQuery }}	if len(queryValues) > 0 {
+		path += "?" + queryValues.Encode()
+	}
 {{ end }}
 {{- $errType := errorType . -}}
 {{ if successType . }}	var result {{ successType . }}
