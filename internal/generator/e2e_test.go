@@ -63,7 +63,7 @@ func TestE2E_PetstoreGeneration(t *testing.T) {
 		"operations.go": false,
 		"pagination.go": false,
 		"retry.go":      false,
-		"middleware.go":  false,
+		"middleware.go": false,
 		"auth.go":       false,
 		"errors.go":     false,
 	}
@@ -464,4 +464,498 @@ func TestAddQueryParam_NonPointerInt(t *testing.T) {
 		t.Fatalf("go test failed: %v\n%s", err, string(output))
 	}
 	t.Logf("addQueryParam pointer tests passed:\n%s", string(output))
+}
+
+// TestE2E_CollidingParamNames verifies the two disambiguation namespaces: a
+// path param whose Go name collides with the "params" struct argument, and two
+// params (query + header) whose Go field names collide inside the params struct.
+// Both must be renamed so the generated code compiles.
+func TestE2E_CollidingParamNames(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: Collision
+  version: 1.0.0
+paths:
+  /things/{params}:
+    get:
+      operationId: getThing
+      parameters:
+        - name: params
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: user-id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: user_id
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+`
+	specPath := filepath.Join(t.TempDir(), "collision.yaml")
+	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
+		t.Fatalf("writing spec: %v", err)
+	}
+
+	result, err := parser.Parse(specPath, parser.Config{})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	pkg, err := analyzer.New(result.Model).Analyze("collision")
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	gen, err := New(pkg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	files, err := gen.Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var ops string
+	for _, f := range files {
+		if f.Name == "operations.go" {
+			ops = string(f.Content)
+		}
+	}
+	// The path param colliding with the params struct arg is renamed; its wire
+	// name (used by pathReplace) is untouched.
+	if !strings.Contains(ops, "paramsPath string") {
+		t.Errorf("path param colliding with params arg not disambiguated:\n%s", ops)
+	}
+	if !strings.Contains(ops, `pathReplace(path, "params", paramsPath)`) {
+		t.Errorf("disambiguated path param must still substitute under its wire name:\n%s", ops)
+	}
+	// The two same-FieldName params must get distinct struct fields, each still
+	// encoded under its own wire name.
+	if !strings.Contains(ops, `setQueryParam(queryValues, "user-id", params.UserID)`) {
+		t.Errorf("query field not at UserID:\n%s", ops)
+	}
+	if !strings.Contains(ops, `headers.Set("user_id", fmt.Sprintf("%v", params.UserIDHeader))`) {
+		t.Errorf("colliding header field not disambiguated to UserIDHeader:\n%s", ops)
+	}
+
+	tmpDir := t.TempDir()
+	goMod := []byte("module collision-e2e-test\n\ngo 1.25.5\n")
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), goMod, 0o644); err != nil {
+		t.Fatalf("writing go.mod: %v", err)
+	}
+	if err := WriteFiles(tmpDir, files); err != nil {
+		t.Fatalf("WriteFiles: %v", err)
+	}
+	cmd := exec.Command("go", "build", "./...")
+	cmd.Dir = tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		for _, f := range files {
+			t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
+		}
+		t.Fatalf("generated code with colliding param names failed to compile: %v\n%s", err, string(output))
+	}
+}
+
+// TestE2E_PaginatedWithRequiredQueryParam guards against the *Iter wrapper
+// dropping required query params. A paginated operation that also has a
+// required query filter must thread that filter through both the Iter signature
+// and the underlying method call, or the generated package fails to compile.
+func TestE2E_PaginatedWithRequiredQueryParam(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: Paged
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: status
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemList'
+components:
+  schemas:
+    ItemList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: string
+        next_cursor:
+          type: string
+`
+	specPath := filepath.Join(t.TempDir(), "paged.yaml")
+	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
+		t.Fatalf("writing spec: %v", err)
+	}
+
+	result, err := parser.Parse(specPath, parser.Config{})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	pkg, err := analyzer.New(result.Model).Analyze("paged")
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	gen, err := New(pkg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	files, err := gen.Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var pag string
+	for _, f := range files {
+		if f.Name == "pagination.go" {
+			pag = string(f.Content)
+		}
+	}
+	if pag == "" {
+		t.Fatal("pagination.go not generated — spec was not detected as paginated")
+	}
+	// The required query param makes the params struct mandatory; the Iter must
+	// take it and forward it (as p) to the underlying call.
+	if !strings.Contains(pag, "params ListItemsParams)") {
+		t.Errorf("Iter method missing mandatory params struct in signature:\n%s", pag)
+	}
+	if !strings.Contains(pag, "p := params") {
+		t.Errorf("Iter does not seed the page params from the required struct:\n%s", pag)
+	}
+	if !strings.Contains(pag, "c.ListItems(ctx, p)") {
+		t.Errorf("Iter call site does not forward the params struct:\n%s", pag)
+	}
+
+	tmpDir := t.TempDir()
+	goMod := []byte("module paged-e2e-test\n\ngo 1.25.5\n")
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), goMod, 0o644); err != nil {
+		t.Fatalf("writing go.mod: %v", err)
+	}
+	if err := WriteFiles(tmpDir, files); err != nil {
+		t.Fatalf("WriteFiles: %v", err)
+	}
+	cmd := exec.Command("go", "build", "./...")
+	cmd.Dir = tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		for _, f := range files {
+			t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
+		}
+		t.Fatalf("paginated client with a required query param failed to compile: %v\n%s", err, string(output))
+	}
+}
+
+// TestE2E_RequiredHeadersAndCookies verifies that required header and cookie
+// params are sent on the wire (previously they were silently dropped), optional
+// ones are conditional, and the generated client actually transmits them — using
+// a real HTTP round-trip against an httptest server.
+func TestE2E_RequiredHeadersAndCookies(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: Hdr
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      parameters:
+        - name: version
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: trace
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: session
+          in: cookie
+          required: true
+          schema:
+            type: string
+        - name: theme
+          in: cookie
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+`
+	specPath := filepath.Join(t.TempDir(), "hdr.yaml")
+	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
+		t.Fatalf("writing spec: %v", err)
+	}
+	result, err := parser.Parse(specPath, parser.Config{})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	pkg, err := analyzer.New(result.Model).Analyze("hdr")
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	gen, err := New(pkg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	files, err := gen.Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var ops string
+	for _, f := range files {
+		if f.Name == "operations.go" {
+			ops = string(f.Content)
+		}
+	}
+	// Required header set unconditionally; required cookie always added.
+	if !strings.Contains(ops, `headers.Set("version", fmt.Sprintf("%v", params.Version))`) {
+		t.Errorf("required header not set unconditionally:\n%s", ops)
+	}
+	if !strings.Contains(ops, `addCookieHeader(headers, "session", params.Session)`) {
+		t.Errorf("required cookie not sent:\n%s", ops)
+	}
+	if !strings.Contains(ops, `addCookieHeader(headers, "theme", params.Theme)`) {
+		t.Errorf("optional cookie not wired:\n%s", ops)
+	}
+	if !strings.Contains(ops, "params GetXParams)") {
+		t.Errorf("required header/cookie did not make the params struct mandatory:\n%s", ops)
+	}
+
+	tmpDir := t.TempDir()
+	goMod := []byte("module hdr-e2e-test\n\ngo 1.25.5\n")
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), goMod, 0o644); err != nil {
+		t.Fatalf("writing go.mod: %v", err)
+	}
+	if err := WriteFiles(tmpDir, files); err != nil {
+		t.Fatalf("WriteFiles: %v", err)
+	}
+	// A generated round-trip test: the client must actually transmit the required
+	// header + cookie, send the optional header, and omit the absent optional cookie.
+	roundTrip := []byte(`package hdr
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestRequiredHeadersAndCookiesOnTheWire(t *testing.T) {
+	var gotVersion, gotTrace, gotCookie string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotVersion = r.Header.Get("version")
+		gotTrace = r.Header.Get("trace")
+		gotCookie = r.Header.Get("Cookie")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	trace := "tr-1"
+	// The session value contains a ';' — a raw concatenation would split the
+	// cookie and corrupt the header; http.Cookie sanitizes the invalid byte away.
+	if err := NewClient(srv.URL).GetX(t.Context(), GetXParams{
+		Version: "v2",
+		Trace:   &trace,
+		Session: "ab;cd",
+		Theme:   nil,
+	}); err != nil {
+		t.Fatalf("GetX: %v", err)
+	}
+	if gotVersion != "v2" {
+		t.Errorf("required header version = %q, want v2", gotVersion)
+	}
+	if gotTrace != "tr-1" {
+		t.Errorf("optional header trace = %q, want tr-1", gotTrace)
+	}
+	if gotCookie != "session=abcd" {
+		t.Errorf("Cookie = %q, want session=abcd (required sent + ';' sanitized, optional theme omitted)", gotCookie)
+	}
+}
+`)
+	if err := os.WriteFile(filepath.Join(tmpDir, "wire_test.go"), roundTrip, 0o644); err != nil {
+		t.Fatalf("writing wire_test.go: %v", err)
+	}
+	cmd := exec.Command("go", "test", "./...")
+	cmd.Dir = tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		for _, f := range files {
+			t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
+		}
+		t.Fatalf("required header/cookie round-trip failed: %v\n%s", err, string(output))
+	}
+}
+
+// TestE2E_BodyWithRequiredParam covers an operation that has BOTH a request body
+// and a required param: the signature must be (ctx, body, params) and compile.
+func TestE2E_BodyWithRequiredParam(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: Body
+  version: 1.0.0
+paths:
+  /things:
+    post:
+      operationId: createThing
+      parameters:
+        - name: idempotency-key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Thing'
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thing'
+components:
+  schemas:
+    Thing:
+      type: object
+      properties:
+        name:
+          type: string
+`
+	files, ops := generateFromSpec(t, spec, "body")
+	if !strings.Contains(ops, "body Thing, params CreateThingParams)") {
+		t.Errorf("body + required param signature wrong (want ctx, body, params):\n%s", ops)
+	}
+	if !strings.Contains(ops, `headers.Set("idempotency-key", fmt.Sprintf("%v", params.IdempotencyKey))`) {
+		t.Errorf("required header not set from the params struct:\n%s", ops)
+	}
+	buildGenerated(t, files, "body-e2e-test")
+}
+
+// TestE2E_RequiredCursorNotPaginated guards the required-cursor edge: a required
+// cursor can't be driven by the iterator (its field is a value, not a pointer),
+// so the op must not be paginated and the package must still compile.
+func TestE2E_RequiredCursorNotPaginated(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: ReqCursor
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: cursor
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemList'
+components:
+  schemas:
+    ItemList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: string
+        next_cursor:
+          type: string
+`
+	files, _ := generateFromSpec(t, spec, "reqcursor")
+	var pag string
+	for _, f := range files {
+		if f.Name == "pagination.go" {
+			pag = string(f.Content)
+		}
+	}
+	if strings.Contains(pag, "ListItemsIter") {
+		t.Errorf("required cursor must not generate an iterator (would not compile):\n%s", pag)
+	}
+	buildGenerated(t, files, "reqcursor-e2e-test")
+}
+
+// generateFromSpec parses an inline spec, analyzes, generates, and returns the
+// files plus the operations.go content.
+func generateFromSpec(t *testing.T, spec, pkgName string) ([]GeneratedFile, string) {
+	t.Helper()
+	specPath := filepath.Join(t.TempDir(), "spec.yaml")
+	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
+		t.Fatalf("writing spec: %v", err)
+	}
+	result, err := parser.Parse(specPath, parser.Config{})
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	pkg, err := analyzer.New(result.Model).Analyze(pkgName)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	gen, err := New(pkg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	files, err := gen.Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	var ops string
+	for _, f := range files {
+		if f.Name == "operations.go" {
+			ops = string(f.Content)
+		}
+	}
+	return files, ops
+}
+
+// buildGenerated writes files to a temp module and runs `go build ./...`.
+func buildGenerated(t *testing.T, files []GeneratedFile, module string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	goMod := []byte("module " + module + "\n\ngo 1.25.5\n")
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), goMod, 0o644); err != nil {
+		t.Fatalf("writing go.mod: %v", err)
+	}
+	if err := WriteFiles(tmpDir, files); err != nil {
+		t.Fatalf("WriteFiles: %v", err)
+	}
+	cmd := exec.Command("go", "build", "./...")
+	cmd.Dir = tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		for _, f := range files {
+			t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
+		}
+		t.Fatalf("generated code failed to compile: %v\n%s", err, string(output))
+	}
 }

@@ -310,3 +310,85 @@ func TestPathToWords(t *testing.T) {
 		}
 	}
 }
+
+// TestDisambiguateParamNames_PositionalArgs covers path params colliding with
+// the fixed positional arguments (ctx, body, and the params struct arg).
+func TestDisambiguateParamNames_PositionalArgs(t *testing.T) {
+	op := &ir.OperationDef{
+		RequestBody: &ir.RequestBodyDef{},
+		PathParams: []*ir.ParamDef{
+			// Collides with the params struct argument (op has query params).
+			{Name: "params", OrigName: "params", Location: "path", Required: true},
+			// Collides with the fixed "body" argument (request body present).
+			{Name: "body", OrigName: "body", Location: "path", Required: true},
+			// Collides with the "result" local the method body declares.
+			{Name: "result", OrigName: "result", Location: "path", Required: true},
+		},
+		QueryParams: []*ir.ParamDef{
+			{Name: "limit", FieldName: "Limit", OrigName: "limit", Location: "query", Required: false},
+		},
+	}
+
+	disambiguateParamNames(op)
+
+	if got := op.PathParams[0].Name; got != "paramsPath" {
+		t.Errorf("path param colliding with params arg: Name = %q, want %q", got, "paramsPath")
+	}
+	if got := op.PathParams[1].Name; got != "bodyPath" {
+		t.Errorf("path param colliding with body arg: Name = %q, want %q", got, "bodyPath")
+	}
+	if got := op.PathParams[2].Name; got != "resultPath" {
+		t.Errorf("path param colliding with the 'result' method local: Name = %q, want %q", got, "resultPath")
+	}
+	// Wire names must never change — only the Go identifier is disambiguated.
+	if got := op.PathParams[0].OrigName; got != "params" {
+		t.Errorf("OrigName changed to %q, want %q", got, "params")
+	}
+}
+
+// TestDisambiguateParamNames_NoStructArg confirms "params"/"opts" are only
+// reserved when the op actually has a params struct argument.
+func TestDisambiguateParamNames_NoStructArg(t *testing.T) {
+	op := &ir.OperationDef{
+		PathParams: []*ir.ParamDef{
+			{Name: "params", OrigName: "params", Location: "path", Required: true},
+		},
+	}
+	disambiguateParamNames(op)
+	if got := op.PathParams[0].Name; got != "params" {
+		t.Errorf("path param Name = %q, want %q (no params struct arg to collide with)", got, "params")
+	}
+}
+
+// TestDisambiguateParamNames_StructFields covers query/header/cookie params
+// whose Go field names collide inside the shared params struct.
+func TestDisambiguateParamNames_StructFields(t *testing.T) {
+	op := &ir.OperationDef{
+		QueryParams: []*ir.ParamDef{
+			{Name: "userId", FieldName: "UserId", OrigName: "user-id", Location: "query", Required: true},
+		},
+		HeaderParams: []*ir.ParamDef{
+			// PascalCases to the same "UserId" as the query param above.
+			{Name: "userId", FieldName: "UserId", OrigName: "user_id", Location: "header", Required: true},
+		},
+		CookieParams: []*ir.ParamDef{
+			{Name: "userId", FieldName: "UserId", OrigName: "userId", Location: "cookie", Required: false},
+		},
+	}
+
+	disambiguateParamNames(op)
+
+	if got := op.QueryParams[0].FieldName; got != "UserId" {
+		t.Errorf("first field = %q, want %q (first occurrence keeps its name)", got, "UserId")
+	}
+	if got := op.HeaderParams[0].FieldName; got != "UserIdHeader" {
+		t.Errorf("colliding header field = %q, want %q", got, "UserIdHeader")
+	}
+	if got := op.CookieParams[0].FieldName; got != "UserIdCookie" {
+		t.Errorf("colliding cookie field = %q, want %q", got, "UserIdCookie")
+	}
+	// Wire names are untouched, so encoding still uses the spec names.
+	if got := op.HeaderParams[0].OrigName; got != "user_id" {
+		t.Errorf("OrigName changed to %q, want %q", got, "user_id")
+	}
+}

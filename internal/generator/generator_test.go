@@ -478,90 +478,6 @@ func TestJsonTag(t *testing.T) {
 	}
 }
 
-func TestHasOptionalQueryParams(t *testing.T) {
-	tests := []struct {
-		name string
-		op   *ir.OperationDef
-		want bool
-	}{
-		{
-			name: "no params",
-			op:   &ir.OperationDef{},
-			want: false,
-		},
-		{
-			name: "only required query params",
-			op: &ir.OperationDef{
-				QueryParams: []*ir.ParamDef{{Name: "id", Required: true}},
-			},
-			want: false,
-		},
-		{
-			name: "optional query param",
-			op: &ir.OperationDef{
-				QueryParams: []*ir.ParamDef{{Name: "limit", Required: false}},
-			},
-			want: true,
-		},
-		{
-			name: "only header params",
-			op: &ir.OperationDef{
-				HeaderParams: []*ir.ParamDef{{Name: "X-Request-Id", Required: false}},
-			},
-			want: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := hasOptionalQueryParams(tt.op); got != tt.want {
-				t.Errorf("hasOptionalQueryParams() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestHasOptionalHeaderParams(t *testing.T) {
-	tests := []struct {
-		name string
-		op   *ir.OperationDef
-		want bool
-	}{
-		{
-			name: "no params",
-			op:   &ir.OperationDef{},
-			want: false,
-		},
-		{
-			name: "only query params",
-			op: &ir.OperationDef{
-				QueryParams: []*ir.ParamDef{{Name: "limit", Required: false}},
-			},
-			want: false,
-		},
-		{
-			name: "optional header param",
-			op: &ir.OperationDef{
-				HeaderParams: []*ir.ParamDef{{Name: "X-Request-Id", Required: false}},
-			},
-			want: true,
-		},
-		{
-			name: "only required header params",
-			op: &ir.OperationDef{
-				HeaderParams: []*ir.ParamDef{{Name: "X-Request-Id", Required: true}},
-			},
-			want: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := hasOptionalHeaderParams(tt.op); got != tt.want {
-				t.Errorf("hasOptionalHeaderParams() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestSuccessContentType(t *testing.T) {
 	tests := []struct {
 		name string
@@ -822,11 +738,11 @@ func TestGenerate_DeprecatedOperation(t *testing.T) {
 		},
 		Operations: []*ir.OperationDef{
 			{
-				Name:        "OldMethod",
-				Summary:     "An old method",
-				HTTPMethod:  "GET",
-				Path:        "/old",
-				Deprecated:  true,
+				Name:       "OldMethod",
+				Summary:    "An old method",
+				HTTPMethod: "GET",
+				Path:       "/old",
+				Deprecated: true,
 				SuccessResponse: &ir.ResponseDef{
 					StatusCode:  "200",
 					ContentType: "application/json",

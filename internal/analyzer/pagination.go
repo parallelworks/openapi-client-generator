@@ -36,10 +36,11 @@ func (a *Analyzer) detectPagination(pkg *ir.Package) {
 
 // detectCursorPagination checks if an operation uses cursor-based pagination.
 func (a *Analyzer) detectCursorPagination(op *ir.OperationDef, pkg *ir.Package) *ir.PaginationDef {
-	// Find a cursor query parameter.
+	// The cursor param must be optional: the iterator drives it as a pointer field
+	// it sets each page, so a required (value) cursor can't be paginated.
 	cursorParam := ""
 	for _, p := range op.QueryParams {
-		if containsCI(cursorParamNames, p.OrigName) {
+		if !p.Required && containsCI(cursorParamNames, p.OrigName) {
 			cursorParam = p.OrigName
 			break
 		}

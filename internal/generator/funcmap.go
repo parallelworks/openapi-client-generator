@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -23,10 +24,9 @@ func FuncMap() template.FuncMap {
 		"hasOperations":           hasOperations,
 		"successType":             successType,
 		"hasBody":                 hasBody,
-		"hasOptionalParams":       hasOptionalParams,
-		"hasOptionalQueryParams":  hasOptionalQueryParams,
 		"hasRequiredQueryParams":  hasRequiredQueryParams,
-		"hasOptionalHeaderParams": hasOptionalHeaderParams,
+		"hasRequiredHeaderParams": hasRequiredHeaderParams,
+		"hasRequiredCookieParams": hasRequiredCookieParams,
 		"paramType":               paramType,
 		"hasUnions":               hasUnions,
 		"discriminatorFieldName":  discriminatorFieldName,
@@ -203,56 +203,19 @@ func hasBody(op *ir.OperationDef) bool {
 	return op.RequestBody != nil
 }
 
-// hasOptionalParams returns true if the operation has optional query, header, or cookie parameters.
-func hasOptionalParams(op *ir.OperationDef) bool {
-	for _, p := range op.QueryParams {
-		if !p.Required {
-			return true
-		}
-	}
-	for _, p := range op.HeaderParams {
-		if !p.Required {
-			return true
-		}
-	}
-	for _, p := range op.CookieParams {
-		if !p.Required {
-			return true
-		}
-	}
-	return false
-}
-
-// hasOptionalQueryParams returns true if the operation has optional query parameters.
-func hasOptionalQueryParams(op *ir.OperationDef) bool {
-	for _, p := range op.QueryParams {
-		if !p.Required {
-			return true
-		}
-	}
-	return false
-}
-
 // hasRequiredQueryParams returns true if the operation has required query parameters.
-// These are emitted as positional method arguments (like path params) so callers
-// must supply them; otherwise the server rejects the request as missing a required param.
 func hasRequiredQueryParams(op *ir.OperationDef) bool {
-	for _, p := range op.QueryParams {
-		if p.Required {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(op.QueryParams, func(p *ir.ParamDef) bool { return p.Required })
 }
 
-// hasOptionalHeaderParams returns true if the operation has optional header parameters.
-func hasOptionalHeaderParams(op *ir.OperationDef) bool {
-	for _, p := range op.HeaderParams {
-		if !p.Required {
-			return true
-		}
-	}
-	return false
+// hasRequiredHeaderParams returns true if the operation has required header parameters.
+func hasRequiredHeaderParams(op *ir.OperationDef) bool {
+	return slices.ContainsFunc(op.HeaderParams, func(p *ir.ParamDef) bool { return p.Required })
+}
+
+// hasRequiredCookieParams returns true if the operation has required cookie parameters.
+func hasRequiredCookieParams(op *ir.OperationDef) bool {
+	return slices.ContainsFunc(op.CookieParams, func(p *ir.ParamDef) bool { return p.Required })
 }
 
 // paramType returns the Go type expression for a parameter.

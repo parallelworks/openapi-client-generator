@@ -4,6 +4,7 @@ package {{ .Name }}
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"reflect"
 	"strings"
@@ -14,22 +15,77 @@ func pathReplace(path, param string, value any) string {
 	return strings.Replace(path, "{"+param+"}", fmt.Sprintf("%v", value), 1)
 }
 
-// addQueryParam adds a non-zero-value query parameter.
-// It handles pointer types by dereferencing them before formatting.
-func addQueryParam(values url.Values, key string, value any) {
-	if value == nil {
-		return
+// isSlice reports whether rv is a slice to encode as repeated keys; a []byte is
+// treated as a scalar string, not a list of bytes.
+func isSlice(rv reflect.Value) bool {
+	return rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() != reflect.Uint8
+}
+
+// addSliceParam appends one query entry per element (e.g. ?ids=a&ids=b).
+func addSliceParam(values url.Values, key string, rv reflect.Value) {
+	for i := 0; i < rv.Len(); i++ {
+		values.Add(key, fmt.Sprintf("%v", rv.Index(i).Interface()))
 	}
-	// Dereference pointer types to get the underlying value.
+}
+
+// derefParam unwraps one pointer level, returning ok=false for a nil interface
+// or nil pointer (a value to skip).
+func derefParam(value any) (reflect.Value, bool) {
+	if value == nil {
+		return reflect.Value{}, false
+	}
 	rv := reflect.ValueOf(value)
 	if rv.Kind() == reflect.Pointer {
 		if rv.IsNil() {
-			return
+			return reflect.Value{}, false
 		}
-		value = rv.Elem().Interface()
+		rv = rv.Elem()
 	}
-	s := fmt.Sprintf("%v", value)
+	return rv, true
+}
+
+// addQueryParam adds a query parameter, dropping zero values; slices become
+// repeated keys.
+func addQueryParam(values url.Values, key string, value any) {
+	rv, ok := derefParam(value)
+	if !ok {
+		return
+	}
+	if isSlice(rv) {
+		addSliceParam(values, key, rv)
+		return
+	}
+	s := fmt.Sprintf("%v", rv.Interface())
 	if s != "" && s != "0" && s != "false" {
 		values.Set(key, s)
+	}
+}
+
+// setQueryParam sets a required query parameter, keeping the zero values ("",
+// "0", "false") addQueryParam would drop — a required param must always be sent.
+func setQueryParam(values url.Values, key string, value any) {
+	rv, ok := derefParam(value)
+	if !ok {
+		return
+	}
+	if isSlice(rv) {
+		addSliceParam(values, key, rv)
+		return
+	}
+	values.Set(key, fmt.Sprintf("%v", rv.Interface()))
+}
+
+// addCookieHeader appends a cookie to the Cookie header, skipping nil optional
+// values. The value goes through http.Cookie so invalid octets are sanitized.
+func addCookieHeader(headers http.Header, name string, value any) {
+	rv, ok := derefParam(value)
+	if !ok {
+		return
+	}
+	cookie := (&http.Cookie{Name: name, Value: fmt.Sprintf("%v", rv.Interface())}).String()
+	if existing := headers.Get("Cookie"); existing != "" {
+		headers.Set("Cookie", existing+"; "+cookie)
+	} else {
+		headers.Set("Cookie", cookie)
 	}
 }

@@ -9,44 +9,51 @@ import (
 	"net/url"
 )
 {{ range .Operations }}
-{{ if hasOptionalParams . }}// {{ .Name }}Params contains optional parameters for the {{ .Name }} operation.
+{{- $hasParams := or .QueryParams .HeaderParams .CookieParams }}
+{{- $hasReqParam := or (hasRequiredQueryParams .) (hasRequiredHeaderParams .) (hasRequiredCookieParams .) }}
+{{- $needHeaders := or .HeaderParams .CookieParams }}
+{{ if $hasParams }}// {{ .Name }}Params contains the parameters for the {{ .Name }} operation.
+// Required parameters are value fields; optional parameters are pointers.
 type {{ .Name }}Params struct {
-{{ range .QueryParams }}{{ if not .Required }}{{ $pDoc := paramDocComment . }}{{ if $pDoc }}{{ indent $pDoc }}
-{{ end }}	{{ .FieldName }} {{ paramType . }} `json:"{{ .OrigName }},omitempty"`
-{{ end }}{{ end }}{{ range .HeaderParams }}{{ if not .Required }}{{ $pDoc := paramDocComment . }}{{ if $pDoc }}{{ indent $pDoc }}
-{{ end }}	{{ .FieldName }} {{ paramType . }} `json:"{{ .OrigName }},omitempty"`
-{{ end }}{{ end }}{{ range .CookieParams }}{{ if not .Required }}{{ $pDoc := paramDocComment . }}{{ if $pDoc }}{{ indent $pDoc }}
-{{ end }}	{{ .FieldName }} {{ paramType . }} `json:"{{ .OrigName }},omitempty"`
-{{ end }}{{ end }}}
+{{ range .QueryParams }}{{ $pDoc := paramDocComment . }}{{ if $pDoc }}{{ indent $pDoc }}
+{{ end }}	{{ .FieldName }} {{ paramType . }} `json:"{{ .OrigName }}{{ if not .Required }},omitempty{{ end }}"`
+{{ end }}{{ range .HeaderParams }}{{ $pDoc := paramDocComment . }}{{ if $pDoc }}{{ indent $pDoc }}
+{{ end }}	{{ .FieldName }} {{ paramType . }} `json:"{{ .OrigName }}{{ if not .Required }},omitempty{{ end }}"`
+{{ end }}{{ range .CookieParams }}{{ $pDoc := paramDocComment . }}{{ if $pDoc }}{{ indent $pDoc }}
+{{ end }}	{{ .FieldName }} {{ paramType . }} `json:"{{ .OrigName }}{{ if not .Required }},omitempty{{ end }}"`
+{{ end }}}
 {{ end }}
 {{ $opDoc := opDocComment . }}{{ if $opDoc }}{{ $opDoc }}
-{{ end }}func (c *Client) {{ .Name }}(ctx context.Context{{ range .PathParams }}, {{ .Name }} {{ .Type }}{{ end }}{{ range .QueryParams }}{{ if .Required }}, {{ .Name }} {{ .Type }}{{ end }}{{ end }}{{ if hasBody . }}, body {{ if .RequestBody }}{{ if not .RequestBody.Required }}*{{ end }}{{ .RequestBody.TypeName }}{{ else }}any{{ end }}{{ end }}{{ if hasOptionalParams . }}, opts ...{{ .Name }}Params{{ end }}) {{ if successType . }}(*{{ successType . }}, error){{ else }}error{{ end }} {
+{{ end }}func (c *Client) {{ .Name }}(ctx context.Context{{ range .PathParams }}, {{ .Name }} {{ .Type }}{{ end }}{{ if hasBody . }}, body {{ if .RequestBody }}{{ if not .RequestBody.Required }}*{{ end }}{{ .RequestBody.TypeName }}{{ else }}any{{ end }}{{ end }}{{ if $hasReqParam }}, params {{ .Name }}Params{{ else if $hasParams }}, opts ...{{ .Name }}Params{{ end }}) {{ if successType . }}(*{{ successType . }}, error){{ else }}error{{ end }} {
 	path := "{{ .Path }}"
 {{ range .PathParams }}	path = pathReplace(path, "{{ .OrigName }}", {{ .Name }})
 {{ end }}
-{{- $hasReqQuery := hasRequiredQueryParams . }}{{- $hasOptQuery := hasOptionalQueryParams . }}{{- $hasOptHeader := hasOptionalHeaderParams . }}
-{{ if or $hasReqQuery $hasOptQuery }}	queryValues := url.Values{}
-{{ range .QueryParams }}{{ if .Required }}	addQueryParam(queryValues, "{{ .OrigName }}", {{ .Name }})
-{{ end }}{{ end }}{{ end }}{{ if hasOptionalParams . }}{{ if $hasOptHeader }}	var headers http.Header
-{{ end }}	if len(opts) > 0 {
-		params := opts[0]
-{{ range .QueryParams }}{{ if not .Required }}		addQueryParam(queryValues, "{{ .OrigName }}", params.{{ .FieldName }})
-{{ end }}{{ end }}{{ if $hasOptHeader }}		headers = make(http.Header)
-{{ range .HeaderParams }}{{ if not .Required }}		if params.{{ .FieldName }} != nil {
-			headers.Set("{{ .OrigName }}", fmt.Sprintf("%v", *params.{{ .FieldName }}))
-		}
-{{ end }}{{ end }}{{ end }}	}
-{{ end }}{{ if or $hasReqQuery $hasOptQuery }}	if len(queryValues) > 0 {
+{{- if and $hasParams (not $hasReqParam) }}	var params {{ .Name }}Params
+	if len(opts) > 0 {
+		params = opts[0]
+	}
+{{ end }}
+{{- if .QueryParams }}	queryValues := url.Values{}
+{{ range .QueryParams }}{{ if .Required }}	setQueryParam(queryValues, "{{ .OrigName }}", params.{{ .FieldName }})
+{{ else }}	addQueryParam(queryValues, "{{ .OrigName }}", params.{{ .FieldName }})
+{{ end }}{{ end }}	if len(queryValues) > 0 {
 		path += "?" + queryValues.Encode()
 	}
 {{ end }}
+{{- if $needHeaders }}	headers := make(http.Header)
+{{ range .HeaderParams }}{{ if .Required }}	headers.Set("{{ .OrigName }}", fmt.Sprintf("%v", params.{{ .FieldName }}))
+{{ else }}	if params.{{ .FieldName }} != nil {
+		headers.Set("{{ .OrigName }}", fmt.Sprintf("%v", *params.{{ .FieldName }}))
+	}
+{{ end }}{{ end }}{{ range .CookieParams }}	addCookieHeader(headers, "{{ .OrigName }}", params.{{ .FieldName }})
+{{ end }}{{ end }}
 {{- $errType := errorType . -}}
 {{ if successType . }}	var result {{ successType . }}
-	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, &result, "{{ successContentType . }}"{{ if hasOptionalHeaderParams . }}, headers{{ end }}); err != nil {
+	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, &result, "{{ successContentType . }}"{{ if $needHeaders }}, headers{{ end }}); err != nil {
 		return nil, {{ if $errType }}parse{{ $errType }}Error(err){{ else }}err{{ end }}
 	}
 	return &result, nil
-{{ else }}	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, nil, "{{ successContentType . }}"{{ if hasOptionalHeaderParams . }}, headers{{ end }}); err != nil {
+{{ else }}	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, nil, "{{ successContentType . }}"{{ if $needHeaders }}, headers{{ end }}); err != nil {
 		return {{ if $errType }}parse{{ $errType }}Error(err){{ else }}err{{ end }}
 	}
 	return nil

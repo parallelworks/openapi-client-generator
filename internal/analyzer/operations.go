@@ -100,7 +100,55 @@ func (a *Analyzer) convertOperation(httpMethod, path string, pathItem *v3high.Pa
 		opDef.SecurityReqs = convertSecurityReqs(op.Security)
 	}
 
+	disambiguateParamNames(opDef)
+
 	return opDef, nil
+}
+
+// disambiguateParamNames renames generated identifiers that would otherwise
+// collide, suffixing by kind; only Go identifiers change, never the wire OrigName.
+func disambiguateParamNames(opDef *ir.OperationDef) {
+	// Reserved: the receiver, args, and method/iterator locals a path param could shadow.
+	posUsed := map[string]bool{
+		"c": true, "ctx": true, "path": true, "queryValues": true,
+		"headers": true, "result": true, "err": true,
+		"cursor": true, "p": true, "next": true,
+	}
+	if opDef.RequestBody != nil {
+		posUsed["body"] = true
+	}
+	if len(opDef.QueryParams) > 0 || len(opDef.HeaderParams) > 0 || len(opDef.CookieParams) > 0 {
+		posUsed["params"] = true
+		posUsed["opts"] = true
+	}
+	for _, p := range opDef.PathParams {
+		name := p.Name
+		for posUsed[name] {
+			name += "Path"
+		}
+		posUsed[name] = true
+		p.Name = name
+	}
+
+	// Query, header, and cookie params share one struct, so dedupe field names by location.
+	fieldUsed := map[string]bool{}
+	dedupeField := func(p *ir.ParamDef, suffix string) {
+		name := p.FieldName
+		for fieldUsed[name] {
+			name += suffix
+		}
+		fieldUsed[name] = true
+		p.FieldName = name
+	}
+	for _, p := range opDef.QueryParams {
+		dedupeField(p, "Query")
+	}
+	for _, p := range opDef.HeaderParams {
+		dedupeField(p, "Header")
+	}
+	for _, p := range opDef.CookieParams {
+		dedupeField(p, "Cookie")
+	}
 }
 
 // operationName determines the Go method name for an operation.

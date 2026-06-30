@@ -59,6 +59,7 @@ func TestGenerate_RequiredQueryParam_Compiles(t *testing.T) {
 				},
 				QueryParams: []*ir.ParamDef{
 					{Name: "startDate", FieldName: "StartDate", OrigName: "startDate", Location: "query", Type: "string", Required: true},
+					{Name: "tags", FieldName: "Tags", OrigName: "tags", Location: "query", Type: "[]string", Required: true},
 					{Name: "endDate", FieldName: "EndDate", OrigName: "endDate", Location: "query", Type: "string", Required: false},
 				},
 			},
@@ -84,26 +85,37 @@ func TestGenerate_RequiredQueryParam_Compiles(t *testing.T) {
 		t.Fatal("operations.go not generated")
 	}
 
-	// The required query param must be a positional argument, not a struct field.
-	if !strings.Contains(ops, "startDate string") {
-		t.Errorf("required query param missing from method signature:\n%s", ops)
+	// A required param is a value field in the params struct (not a pointer), and
+	// because the op has a required param the struct is a mandatory argument.
+	if !strings.Contains(ops, "StartDate string `json:\"startDate\"`") {
+		t.Errorf("required query param not a value field in the params struct:\n%s", ops)
 	}
-	if strings.Contains(ops, "StartDate") {
-		t.Errorf("required query param leaked into the params struct (StartDate):\n%s", ops)
+	if !strings.Contains(ops, "params GetUsageSummaryParams)") {
+		t.Errorf("required param did not make the params struct a mandatory argument:\n%s", ops)
 	}
-	// The required param must be encoded unconditionally (from the positional arg).
-	if !strings.Contains(ops, `addQueryParam(queryValues, "startDate", startDate)`) {
-		t.Errorf("required query param not encoded into the query string:\n%s", ops)
+	// The required param must be encoded unconditionally via setQueryParam (which,
+	// unlike addQueryParam, does not drop zero values like "", "0", or "false").
+	if !strings.Contains(ops, `setQueryParam(queryValues, "startDate", params.StartDate)`) {
+		t.Errorf("required query param not encoded unconditionally into the query string:\n%s", ops)
 	}
-	// The optional param stays in the params struct and is encoded from opts.
+	// A required slice param is a value []T field, encoded unconditionally.
+	if !strings.Contains(ops, "Tags []string `json:\"tags\"`") {
+		t.Errorf("required slice query param not a value field in the params struct:\n%s", ops)
+	}
+	if !strings.Contains(ops, `setQueryParam(queryValues, "tags", params.Tags)`) {
+		t.Errorf("required slice query param not encoded into the query string:\n%s", ops)
+	}
+	// The optional param is a pointer field, encoded conditionally via addQueryParam.
 	if !strings.Contains(ops, "EndDate *string") {
 		t.Errorf("optional query param missing from params struct:\n%s", ops)
 	}
 	if !strings.Contains(ops, `addQueryParam(queryValues, "endDate", params.EndDate)`) {
-		t.Errorf("optional query param not encoded from opts:\n%s", ops)
+		t.Errorf("optional query param not encoded from params:\n%s", ops)
 	}
 
-	// The whole generated package must compile.
+	// The whole generated package must compile, and the required-param encoder
+	// must keep zero values (a required param dropped from the URL makes the
+	// server reject the request as missing a required parameter).
 	tmpDir := t.TempDir()
 	goMod := []byte("module reqquery-e2e-test\n\ngo 1.25.5\n")
 	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), goMod, 0o644); err != nil {
@@ -112,12 +124,47 @@ func TestGenerate_RequiredQueryParam_Compiles(t *testing.T) {
 	if err := WriteFiles(tmpDir, files); err != nil {
 		t.Fatalf("WriteFiles: %v", err)
 	}
-	cmd := exec.Command("go", "build", "./...")
+	// A generated unit test that exercises setQueryParam with zero values
+	// directly, proving required params are never silently dropped.
+	zeroTest := []byte(`package reqquery
+
+import (
+	"net/url"
+	"testing"
+)
+
+func TestSetQueryParamKeepsZeroValues(t *testing.T) {
+	for _, v := range []any{0, false, ""} {
+		vals := url.Values{}
+		setQueryParam(vals, "k", v)
+		if _, ok := vals["k"]; !ok {
+			t.Errorf("setQueryParam dropped required zero value %#v; required params must always be encoded", v)
+		}
+	}
+}
+
+func TestQueryParamsEncodeSlicesAsRepeatedKeys(t *testing.T) {
+	vals := url.Values{}
+	setQueryParam(vals, "ids", []string{"a", "b", "c"})
+	if got := vals["ids"]; len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {
+		t.Errorf("setQueryParam([]string) = %#v; want repeated keys [a b c]", got)
+	}
+	vals = url.Values{}
+	addQueryParam(vals, "nums", []int{1, 2, 3})
+	if got := vals["nums"]; len(got) != 3 || got[0] != "1" || got[2] != "3" {
+		t.Errorf("addQueryParam([]int) = %#v; want repeated keys [1 2 3]", got)
+	}
+}
+`)
+	if err := os.WriteFile(filepath.Join(tmpDir, "zero_value_test.go"), zeroTest, 0o644); err != nil {
+		t.Fatalf("writing zero_value_test.go: %v", err)
+	}
+	cmd := exec.Command("go", "test", "./...")
 	cmd.Dir = tmpDir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		for _, f := range files {
 			t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
 		}
-		t.Fatalf("generated code with a required query param failed to compile: %v\n%s", err, string(output))
+		t.Fatalf("generated code with a required query param failed to build/test: %v\n%s", err, string(output))
 	}
 }
