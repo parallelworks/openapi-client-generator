@@ -34,18 +34,14 @@ type {{ .Name }}Params struct {
 	}
 {{ end }}
 {{- if .QueryParams }}	queryValues := url.Values{}
-{{ range .QueryParams }}{{ if .Required }}	setQueryParam(queryValues, "{{ .OrigName }}", params.{{ .FieldName }})
-{{ else }}	addQueryParam(queryValues, "{{ .OrigName }}", params.{{ .FieldName }})
-{{ end }}{{ end }}	if len(queryValues) > 0 {
+{{ range .QueryParams }}	addQueryParam(queryValues, "{{ .OrigName }}", params.{{ .FieldName }})
+{{ end }}	if len(queryValues) > 0 {
 		path += "?" + queryValues.Encode()
 	}
 {{ end }}
 {{- if $needHeaders }}	headers := make(http.Header)
-{{ range .HeaderParams }}{{ if .Required }}	headers.Set("{{ .OrigName }}", fmt.Sprintf("%v", params.{{ .FieldName }}))
-{{ else }}	if params.{{ .FieldName }} != nil {
-		headers.Set("{{ .OrigName }}", fmt.Sprintf("%v", *params.{{ .FieldName }}))
-	}
-{{ end }}{{ end }}{{ range .CookieParams }}	addCookieHeader(headers, "{{ .OrigName }}", params.{{ .FieldName }})
+{{ range .HeaderParams }}	setHeader(headers, "{{ .OrigName }}", params.{{ .FieldName }})
+{{ end }}{{ range .CookieParams }}	addCookieHeader(headers, "{{ .OrigName }}", params.{{ .FieldName }})
 {{ end }}{{ end }}
 {{- $errType := errorType . -}}
 {{ if successType . }}	var result {{ successType . }}

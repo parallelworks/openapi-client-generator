@@ -93,19 +93,21 @@ func TestGenerate_RequiredQueryParam_Compiles(t *testing.T) {
 	if !strings.Contains(ops, "params GetUsageSummaryParams)") {
 		t.Errorf("required param did not make the params struct a mandatory argument:\n%s", ops)
 	}
-	// The required param must be encoded unconditionally via setQueryParam (which,
-	// unlike addQueryParam, does not drop zero values like "", "0", or "false").
-	if !strings.Contains(ops, `setQueryParam(queryValues, "startDate", params.StartDate)`) {
-		t.Errorf("required query param not encoded unconditionally into the query string:\n%s", ops)
+	// Required and optional params alike are encoded via addQueryParam, which sends
+	// any present value (a nil optional pointer is the only thing it skips), so a
+	// required param — and an explicitly-set optional zero value — always reaches
+	// the server.
+	if !strings.Contains(ops, `addQueryParam(queryValues, "startDate", params.StartDate)`) {
+		t.Errorf("required query param not encoded into the query string:\n%s", ops)
 	}
-	// A required slice param is a value []T field, encoded unconditionally.
+	// A required slice param is a value []T field, encoded as repeated keys.
 	if !strings.Contains(ops, "Tags []string `json:\"tags\"`") {
 		t.Errorf("required slice query param not a value field in the params struct:\n%s", ops)
 	}
-	if !strings.Contains(ops, `setQueryParam(queryValues, "tags", params.Tags)`) {
+	if !strings.Contains(ops, `addQueryParam(queryValues, "tags", params.Tags)`) {
 		t.Errorf("required slice query param not encoded into the query string:\n%s", ops)
 	}
-	// The optional param is a pointer field, encoded conditionally via addQueryParam.
+	// The optional param is a pointer field, also encoded via addQueryParam.
 	if !strings.Contains(ops, "EndDate *string") {
 		t.Errorf("optional query param missing from params struct:\n%s", ops)
 	}
@@ -113,9 +115,9 @@ func TestGenerate_RequiredQueryParam_Compiles(t *testing.T) {
 		t.Errorf("optional query param not encoded from params:\n%s", ops)
 	}
 
-	// The whole generated package must compile, and the required-param encoder
-	// must keep zero values (a required param dropped from the URL makes the
-	// server reject the request as missing a required parameter).
+	// The whole generated package must compile, and the param encoder must keep
+	// zero values (a required param dropped from the URL makes the server reject
+	// the request as missing a required parameter).
 	tmpDir := t.TempDir()
 	goMod := []byte("module reqquery-e2e-test\n\ngo 1.25.5\n")
 	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), goMod, 0o644); err != nil {
@@ -124,8 +126,8 @@ func TestGenerate_RequiredQueryParam_Compiles(t *testing.T) {
 	if err := WriteFiles(tmpDir, files); err != nil {
 		t.Fatalf("WriteFiles: %v", err)
 	}
-	// A generated unit test that exercises setQueryParam with zero values
-	// directly, proving required params are never silently dropped.
+	// A generated unit test that exercises addQueryParam directly, proving a
+	// required value and an explicitly-set optional zero value are both encoded.
 	zeroTest := []byte(`package reqquery
 
 import (
@@ -133,21 +135,42 @@ import (
 	"testing"
 )
 
-func TestSetQueryParamKeepsZeroValues(t *testing.T) {
+func ptr[T any](v T) *T { return &v }
+
+// A required param (a plain value) must always be encoded, even at its zero value.
+func TestAddQueryParamKeepsRequiredZeroValues(t *testing.T) {
 	for _, v := range []any{0, false, ""} {
 		vals := url.Values{}
-		setQueryParam(vals, "k", v)
+		addQueryParam(vals, "k", v)
 		if _, ok := vals["k"]; !ok {
-			t.Errorf("setQueryParam dropped required zero value %#v; required params must always be encoded", v)
+			t.Errorf("addQueryParam dropped required zero value %#v; required params must always be encoded", v)
 		}
+	}
+}
+
+// An optional param is a pointer: a non-nil pointer means "explicitly set", so an
+// explicit zero value must be sent — only a nil pointer is skipped.
+func TestAddQueryParamSendsExplicitOptionalZeroValues(t *testing.T) {
+	for _, v := range []any{ptr(0), ptr(false), ptr("")} {
+		vals := url.Values{}
+		addQueryParam(vals, "k", v)
+		if _, ok := vals["k"]; !ok {
+			t.Errorf("addQueryParam dropped explicitly-set optional zero value %#v", v)
+		}
+	}
+	var nilPtr *int
+	vals := url.Values{}
+	addQueryParam(vals, "k", nilPtr)
+	if _, ok := vals["k"]; ok {
+		t.Error("addQueryParam encoded an unset (nil) optional param")
 	}
 }
 
 func TestQueryParamsEncodeSlicesAsRepeatedKeys(t *testing.T) {
 	vals := url.Values{}
-	setQueryParam(vals, "ids", []string{"a", "b", "c"})
+	addQueryParam(vals, "ids", []string{"a", "b", "c"})
 	if got := vals["ids"]; len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {
-		t.Errorf("setQueryParam([]string) = %#v; want repeated keys [a b c]", got)
+		t.Errorf("addQueryParam([]string) = %#v; want repeated keys [a b c]", got)
 	}
 	vals = url.Values{}
 	addQueryParam(vals, "nums", []int{1, 2, 3})

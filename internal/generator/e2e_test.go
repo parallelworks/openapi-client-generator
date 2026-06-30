@@ -321,10 +321,10 @@ func TestE2E_HeaderParamsGeneration(t *testing.T) {
 	if !strings.Contains(opsContent, "CreateChatCompletionParams") {
 		t.Error("missing CreateChatCompletionParams struct")
 	}
-	if !strings.Contains(opsContent, `headers.Set("X-Conversation-Id"`) {
+	if !strings.Contains(opsContent, `setHeader(headers, "X-Conversation-Id"`) {
 		t.Error("missing header set for X-Conversation-Id in CreateChatCompletion")
 	}
-	if !strings.Contains(opsContent, `headers.Set("X-Request-Priority"`) {
+	if !strings.Contains(opsContent, `setHeader(headers, "X-Request-Priority"`) {
 		t.Error("missing header set for X-Request-Priority in CreateChatCompletion")
 	}
 
@@ -335,7 +335,7 @@ func TestE2E_HeaderParamsGeneration(t *testing.T) {
 	if !strings.Contains(opsContent, `addQueryParam(queryValues, "limit"`) {
 		t.Error("missing query param for limit in StreamChatCompletion")
 	}
-	if !strings.Contains(opsContent, `headers.Set("X-Conversation-Id"`) {
+	if !strings.Contains(opsContent, `setHeader(headers, "X-Conversation-Id"`) {
 		t.Error("missing header set for X-Conversation-Id in StreamChatCompletion")
 	}
 
@@ -537,10 +537,10 @@ paths:
 	}
 	// The two same-FieldName params must get distinct struct fields, each still
 	// encoded under its own wire name.
-	if !strings.Contains(ops, `setQueryParam(queryValues, "user-id", params.UserID)`) {
+	if !strings.Contains(ops, `addQueryParam(queryValues, "user-id", params.UserID)`) {
 		t.Errorf("query field not at UserID:\n%s", ops)
 	}
-	if !strings.Contains(ops, `headers.Set("user_id", fmt.Sprintf("%v", params.UserIDHeader))`) {
+	if !strings.Contains(ops, `setHeader(headers, "user_id", params.UserIDHeader)`) {
 		t.Errorf("colliding header field not disambiguated to UserIDHeader:\n%s", ops)
 	}
 
@@ -732,7 +732,7 @@ paths:
 		}
 	}
 	// Required header set unconditionally; required cookie always added.
-	if !strings.Contains(ops, `headers.Set("version", fmt.Sprintf("%v", params.Version))`) {
+	if !strings.Contains(ops, `setHeader(headers, "version", params.Version)`) {
 		t.Errorf("required header not set unconditionally:\n%s", ops)
 	}
 	if !strings.Contains(ops, `addCookieHeader(headers, "session", params.Session)`) {
@@ -850,7 +850,7 @@ components:
 	if !strings.Contains(ops, "body Thing, params CreateThingParams)") {
 		t.Errorf("body + required param signature wrong (want ctx, body, params):\n%s", ops)
 	}
-	if !strings.Contains(ops, `headers.Set("idempotency-key", fmt.Sprintf("%v", params.IdempotencyKey))`) {
+	if !strings.Contains(ops, `setHeader(headers, "idempotency-key", params.IdempotencyKey)`) {
 		t.Errorf("required header not set from the params struct:\n%s", ops)
 	}
 	buildGenerated(t, files, "body-e2e-test")
@@ -904,6 +904,215 @@ components:
 		t.Errorf("required cursor must not generate an iterator (would not compile):\n%s", pag)
 	}
 	buildGenerated(t, files, "reqcursor-e2e-test")
+}
+
+// TestE2E_PathParamShadowsImport guards against a path param whose Go name
+// matches a package the generated method body uses (url/http/fmt/context). Such a
+// name must be suffixed, or it shadows the import (`url.Values{}` -> "url.Values
+// is not a type") and the package fails to compile.
+func TestE2E_PathParamShadowsImport(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: Shadow
+  version: 1.0.0
+paths:
+  /proxy/{url}:
+    get:
+      operationId: getProxy
+      parameters:
+        - name: url
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: ttl
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: ok
+`
+	files, ops := generateFromSpec(t, spec, "shadow")
+	// The path param is renamed off the import, but still substitutes under its
+	// original wire name.
+	if !strings.Contains(ops, "urlPath string") {
+		t.Errorf("path param shadowing the net/url import was not disambiguated:\n%s", ops)
+	}
+	if !strings.Contains(ops, `pathReplace(path, "url", urlPath)`) {
+		t.Errorf("disambiguated path param must still substitute under its wire name:\n%s", ops)
+	}
+	buildGenerated(t, files, "shadow-e2e-test")
+}
+
+// TestE2E_PaginatedWithBody guards the *Iter wrapper forwarding a request body. A
+// paginated operation that also has a body must thread it through the Iter
+// signature and the underlying call, or the generated package fails to compile.
+func TestE2E_PaginatedWithBody(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: PagedBody
+  version: 1.0.0
+paths:
+  /search:
+    post:
+      operationId: search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Query'
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemList'
+components:
+  schemas:
+    Query:
+      type: object
+      properties:
+        term:
+          type: string
+    ItemList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: string
+        next_cursor:
+          type: string
+`
+	files, _ := generateFromSpec(t, spec, "pagedbody")
+	var pag string
+	for _, f := range files {
+		if f.Name == "pagination.go" {
+			pag = string(f.Content)
+		}
+	}
+	if pag == "" {
+		t.Fatal("pagination.go not generated — spec was not detected as paginated")
+	}
+	// The Iter must accept and forward the body, between the path params and the
+	// page-params struct, matching the underlying method's argument order.
+	if !strings.Contains(pag, "body Query") {
+		t.Errorf("Iter signature does not accept the request body:\n%s", pag)
+	}
+	if !strings.Contains(pag, "c.Search(ctx, body, p)") {
+		t.Errorf("Iter call site does not forward the body:\n%s", pag)
+	}
+	buildGenerated(t, files, "pagedbody-e2e-test")
+}
+
+// TestE2E_ParamEncodingOnTheWire is a round-trip covering three encodings the
+// generator previously got wrong: a []byte (format:byte) param sent as its string
+// value (not "[104 105]"), an explicitly-set optional zero value (?flag=false)
+// reaching the server, and an array header comma-joined (X-Tags: a,b).
+func TestE2E_ParamEncodingOnTheWire(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: Wire
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      parameters:
+        - name: sig
+          in: query
+          required: true
+          schema:
+            type: string
+            format: byte
+        - name: flag
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: X-Tags
+          in: header
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        '200':
+          description: ok
+`
+	files, ops := generateFromSpec(t, spec, "wire")
+	if !strings.Contains(ops, "Sig []byte") {
+		t.Errorf("format:byte query param should be a []byte field:\n%s", ops)
+	}
+
+	tmpDir := t.TempDir()
+	goMod := []byte("module wire-e2e-test\n\ngo 1.25.5\n")
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), goMod, 0o644); err != nil {
+		t.Fatalf("writing go.mod: %v", err)
+	}
+	if err := WriteFiles(tmpDir, files); err != nil {
+		t.Fatalf("WriteFiles: %v", err)
+	}
+	roundTrip := []byte(`package wire
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func ptr[T any](v T) *T { return &v }
+
+func TestParamEncodingOnTheWire(t *testing.T) {
+	var gotSig, gotFlag, gotTags string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSig = r.URL.Query().Get("sig")
+		gotFlag = r.URL.Query().Get("flag")
+		gotTags = r.Header.Get("X-Tags")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	if err := NewClient(srv.URL).GetX(t.Context(), GetXParams{
+		Sig:   []byte("hi"),
+		Flag:  ptr(false),
+		XTags: []string{"a", "b"},
+	}); err != nil {
+		t.Fatalf("GetX: %v", err)
+	}
+	if gotSig != "hi" {
+		t.Errorf("[]byte query param sig = %q, want \"hi\" (not Go byte-slice notation)", gotSig)
+	}
+	if gotFlag != "false" {
+		t.Errorf("explicitly-set optional flag = %q, want \"false\" (zero value must be sent)", gotFlag)
+	}
+	if gotTags != "a,b" {
+		t.Errorf("array header X-Tags = %q, want \"a,b\" (comma-joined)", gotTags)
+	}
+}
+`)
+	if err := os.WriteFile(filepath.Join(tmpDir, "wire_test.go"), roundTrip, 0o644); err != nil {
+		t.Fatalf("writing wire_test.go: %v", err)
+	}
+	cmd := exec.Command("go", "test", "./...")
+	cmd.Dir = tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		for _, f := range files {
+			t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
+		}
+		t.Fatalf("param-encoding round-trip failed: %v\n%s", err, string(output))
+	}
 }
 
 // generateFromSpec parses an inline spec, analyzes, generates, and returns the
