@@ -3,11 +3,13 @@
 package {{ .Name }}
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/url"
 	"reflect"
 	"strings"
+	"time"
 )
 
 // pathReplace replaces a {param} placeholder in a URL path with the given value.
@@ -21,12 +23,15 @@ func isSlice(rv reflect.Value) bool {
 	return rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() != reflect.Uint8
 }
 
-// formatParam renders a dereferenced value for a URL or header. A []byte becomes
-// its string form (not Go's "[104 105]" byte-slice notation), a slice is joined
-// with commas, and everything else uses default formatting.
+// formatParam renders a dereferenced value for a URL or header per its type: a
+// time.Time as RFC 3339, a []byte (OpenAPI format:byte) as base64, a slice as a
+// comma-joined list, and everything else with default formatting.
 func formatParam(rv reflect.Value) string {
-	if rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
-		return string(rv.Bytes())
+	switch v := rv.Interface().(type) {
+	case time.Time:
+		return v.Format(time.RFC3339)
+	case []byte:
+		return base64.StdEncoding.EncodeToString(v)
 	}
 	if isSlice(rv) {
 		parts := make([]string, rv.Len())

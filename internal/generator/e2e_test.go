@@ -1035,6 +1035,12 @@ paths:
           schema:
             type: string
             format: byte
+        - name: since
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
         - name: flag
           in: query
           required: false
@@ -1055,6 +1061,9 @@ paths:
 	if !strings.Contains(ops, "Sig []byte") {
 		t.Errorf("format:byte query param should be a []byte field:\n%s", ops)
 	}
+	if !strings.Contains(ops, "Since time.Time") {
+		t.Errorf("format:date-time query param should be a time.Time field:\n%s", ops)
+	}
 
 	tmpDir := t.TempDir()
 	goMod := []byte("module wire-e2e-test\n\ngo 1.25.5\n")
@@ -1070,14 +1079,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func ptr[T any](v T) *T { return &v }
 
 func TestParamEncodingOnTheWire(t *testing.T) {
-	var gotSig, gotFlag, gotTags string
+	var gotSig, gotSince, gotFlag, gotTags string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotSig = r.URL.Query().Get("sig")
+		gotSince = r.URL.Query().Get("since")
 		gotFlag = r.URL.Query().Get("flag")
 		gotTags = r.Header.Get("X-Tags")
 		w.WriteHeader(http.StatusOK)
@@ -1086,13 +1097,17 @@ func TestParamEncodingOnTheWire(t *testing.T) {
 
 	if err := NewClient(srv.URL).GetX(t.Context(), GetXParams{
 		Sig:   []byte("hi"),
+		Since: time.Date(2023, 1, 2, 3, 4, 5, 0, time.UTC),
 		Flag:  ptr(false),
 		XTags: []string{"a", "b"},
 	}); err != nil {
 		t.Fatalf("GetX: %v", err)
 	}
-	if gotSig != "hi" {
-		t.Errorf("[]byte query param sig = %q, want \"hi\" (not Go byte-slice notation)", gotSig)
+	if gotSig != "aGk=" {
+		t.Errorf("[]byte (format:byte) query param sig = %q, want base64 \"aGk=\"", gotSig)
+	}
+	if gotSince != "2023-01-02T03:04:05Z" {
+		t.Errorf("time.Time query param since = %q, want RFC3339 \"2023-01-02T03:04:05Z\"", gotSince)
 	}
 	if gotFlag != "false" {
 		t.Errorf("explicitly-set optional flag = %q, want \"false\" (zero value must be sent)", gotFlag)
