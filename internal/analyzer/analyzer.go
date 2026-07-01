@@ -3,6 +3,7 @@ package analyzer
 import (
 	"fmt"
 
+	highbase "github.com/pb33f/libopenapi/datamodel/high/base"
 	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
 
 	"github.com/parallelworks/openapi-client-generator/internal/ir"
@@ -83,11 +84,20 @@ func (a *Analyzer) analyzeComponentSchemas(pkg *ir.Package) error {
 		return nil
 	}
 
+	// Register every component's Go type name before converting any schema, so an
+	// enum constant that sanitizes to a schema-named type (e.g. Color.red -> const
+	// ColorRed vs a ColorRed schema) yields the numeric suffix to the const, not to
+	// the user's public API type.
+	type pendingSchema struct {
+		goName string
+		schema *highbase.Schema
+	}
+	pending := make(map[string]pendingSchema)
+	var order []string
 	for name, schemaProxy := range a.model.Components.Schemas.FromOldest() {
 		if _, exists := a.typesBySchema[name]; exists {
 			continue
 		}
-
 		schema, err := schemaProxy.BuildSchema()
 		if err != nil {
 			return fmt.Errorf("building schema %q: %w", name, err)
@@ -95,9 +105,13 @@ func (a *Analyzer) analyzeComponentSchemas(pkg *ir.Package) error {
 		if schema == nil {
 			continue
 		}
+		pending[name] = pendingSchema{a.namer.RegisterName(naming.ToGoName(name)), schema}
+		order = append(order, name)
+	}
 
-		goName := a.namer.RegisterName(naming.ToGoName(name))
-		td, err := a.convertSchema(goName, name, schema)
+	for _, name := range order {
+		p := pending[name]
+		td, err := a.convertSchema(p.goName, name, p.schema)
 		if err != nil {
 			return fmt.Errorf("converting schema %q: %w", name, err)
 		}

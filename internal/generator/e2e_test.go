@@ -1919,6 +1919,7 @@ paths:
       operationId: getM
       parameters:
         - {name: c, in: query, required: true, schema: {$ref: '#/components/schemas/Codes'}}
+        - {name: b, in: query, required: true, schema: {$ref: '#/components/schemas/Big'}}
       responses:
         '200':
           description: ok
@@ -1927,6 +1928,10 @@ components:
     Codes:
       type: integer
       enum: [010, 08, 09, 0x1F]
+    Big:
+      type: integer
+      format: int32
+      enum: [1, 05000000000]
 `
 	files, _ := generateFromSpec(t, spec, "leadingzero")
 	var types string
@@ -1941,6 +1946,11 @@ components:
 		if !strings.Contains(types, want) {
 			t.Errorf("integer enum member %q missing/misparsed:\n%s", want, types)
 		}
+	}
+	// A leading-zero decimal that overflows int32 must be dropped, not reread as
+	// octal (0o5000000000 = 671088640).
+	if strings.Contains(types, "671088640") {
+		t.Errorf("overflowing leading-zero decimal was misparsed as octal:\n%s", types)
 	}
 }
 
@@ -1977,12 +1987,18 @@ components:
         x:
           type: string
 `
-	files, ops := generateFromSpec(t, spec, "collide")
-	if !strings.Contains(ops, "ColorRed") {
-		t.Errorf("expected the ColorRed body type to be referenced:\n%s", ops)
+	files, _ := generateFromSpec(t, spec, "collide")
+	var types string
+	for _, f := range files {
+		if f.Name == "types.go" {
+			types = string(f.Content)
+		}
 	}
-	// The const and the type share the package namespace; one is renamed so the
-	// package compiles rather than declaring the same identifier twice.
+	// The const and the type share the package namespace; the user's schema type
+	// keeps its name and the generated const yields the numeric suffix.
+	if !strings.Contains(types, "type ColorRed struct") {
+		t.Errorf("user's ColorRed type should keep its name (const should be suffixed):\n%s", types)
+	}
 	buildGenerated(t, files, "collide-e2e-test")
 }
 

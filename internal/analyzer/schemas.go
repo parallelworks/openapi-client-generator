@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -103,13 +104,11 @@ func (a *Analyzer) convertEnum(goName string, schema *highbase.Schema, nullable 
 	return td, nil
 }
 
-// constableType reports whether Go can declare a typed constant of goType.
+// constableType reports whether Go can declare a typed constant of goType (the
+// const-able primitives goTypeForPrimitive produces; time.Time/[]byte/any are not).
 func constableType(goType string) bool {
 	switch goType {
-	case "string", "bool",
-		"int", "int8", "int16", "int32", "int64",
-		"uint", "uint8", "uint16", "uint32", "uint64",
-		"float32", "float64":
+	case "string", "bool", "int32", "int64", "float32", "float64":
 		return true
 	}
 	return false
@@ -126,23 +125,21 @@ func enumConstLiteral(goType, raw string) (string, bool) {
 		if b, err := strconv.ParseBool(raw); err == nil {
 			return strconv.FormatBool(b), true
 		}
-	case "int", "int8", "int16", "int32", "int64":
-		// Base 10 first so a leading-zero decimal (010) stays decimal, then base 0
-		// as a fallback for hex/octal/binary/underscored literals (0x1F, 0o17).
-		n, err := strconv.ParseInt(raw, 10, intBits(goType))
-		if err != nil {
-			n, err = strconv.ParseInt(raw, 0, intBits(goType))
+	case "int32", "int64":
+		bits := 64
+		if goType == "int32" {
+			bits = 32
+		}
+		// Base 10 first so a leading-zero decimal (010) stays decimal; fall back to
+		// base 0 only on a syntax error (hex/octal/underscored like 0x1F/0o17),
+		// never on ErrRange — an overflowing value must be dropped, not reread as
+		// octal.
+		n, err := strconv.ParseInt(raw, 10, bits)
+		if errors.Is(err, strconv.ErrSyntax) {
+			n, err = strconv.ParseInt(raw, 0, bits)
 		}
 		if err == nil {
 			return strconv.FormatInt(n, 10), true
-		}
-	case "uint", "uint8", "uint16", "uint32", "uint64":
-		n, err := strconv.ParseUint(raw, 10, intBits(goType))
-		if err != nil {
-			n, err = strconv.ParseUint(raw, 0, intBits(goType))
-		}
-		if err == nil {
-			return strconv.FormatUint(n, 10), true
 		}
 	case "float32", "float64":
 		bits := 64
@@ -154,19 +151,6 @@ func enumConstLiteral(goType, raw string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func intBits(goType string) int {
-	switch goType {
-	case "int8", "uint8":
-		return 8
-	case "int16", "uint16":
-		return 16
-	case "int32", "uint32":
-		return 32
-	default:
-		return 64
-	}
 }
 
 // convertAllOf creates a struct TypeDef from an allOf composition.
