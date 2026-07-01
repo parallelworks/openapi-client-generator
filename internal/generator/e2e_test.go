@@ -1204,11 +1204,12 @@ paths:
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
 func TestArrayStyles(t *testing.T) {
-	var csv, spaced, piped string
+	var csv, spaced, piped, rawQuery string
 	var repeated, plain []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		csv = r.URL.Query().Get("csv")
@@ -1216,6 +1217,7 @@ func TestArrayStyles(t *testing.T) {
 		piped = r.URL.Query().Get("piped")
 		repeated = r.URL.Query()["repeated"]
 		plain = r.URL.Query()["plain"]
+		rawQuery = r.URL.RawQuery
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
@@ -1231,6 +1233,10 @@ func TestArrayStyles(t *testing.T) {
 	}
 	if spaced != "a b c" {
 		t.Errorf("spaceDelimited spaced = %q, want \"a b c\"", spaced)
+	}
+	// The separator must be the RFC 3986 %20, not the form-encoding '+'.
+	if !strings.Contains(rawQuery, "spaced=a%20b%20c") {
+		t.Errorf("spaceDelimited raw query = %q, want spaced=a%%20b%%20c", rawQuery)
 	}
 	if piped != "a|b|c" {
 		t.Errorf("pipeDelimited piped = %q, want a|b|c", piped)

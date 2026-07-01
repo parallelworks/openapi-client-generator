@@ -201,6 +201,14 @@ func addQueryParam(values url.Values, key, style string, explode bool, value any
 	}
 }
 
+// encodeQuery renders the query string. url.Values.Encode escapes a space as '+'
+// (form encoding), but spaceDelimited params — and any value with a space — need
+// the RFC 3986 '%20', so rewrite '+' to it. This is safe because Encode emits a
+// literal '+' only for a space; a '+' in the data is already escaped as '%2B'.
+func encodeQuery(values url.Values) string {
+	return strings.ReplaceAll(values.Encode(), "+", "%20")
+}
+
 // queryDelim is the separator for an unexploded array under a query style.
 func queryDelim(style string) string {
 	switch style {

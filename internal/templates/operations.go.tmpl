@@ -36,7 +36,7 @@ type {{ .Name }}Params struct {
 {{- if .QueryParams }}	queryValues := url.Values{}
 {{ range .QueryParams }}	addQueryParam(queryValues, "{{ .OrigName }}", "{{ .Style }}", {{ .Explode }}, params.{{ .FieldName }})
 {{ end }}	if len(queryValues) > 0 {
-		path += "?" + queryValues.Encode()
+		path += "?" + encodeQuery(queryValues)
 	}
 {{ end }}
 {{- if $needHeaders }}	headers := make(http.Header)
