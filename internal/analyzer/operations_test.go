@@ -10,6 +10,37 @@ import (
 	"github.com/parallelworks/openapi-client-generator/internal/parser"
 )
 
+func TestEffectiveStyleExplode(t *testing.T) {
+	b := func(v bool) *bool { return &v }
+	tests := []struct {
+		name        string
+		in          string
+		style       string
+		explode     *bool
+		wantStyle   string
+		wantExplode bool
+	}{
+		{"query default", "query", "", nil, "form", true},
+		{"query explode=false", "query", "", b(false), "form", false},
+		{"query spaceDelimited default explode", "query", "spaceDelimited", nil, "spaceDelimited", false},
+		{"query pipeDelimited explode=true", "query", "pipeDelimited", b(true), "pipeDelimited", true},
+		{"header default", "header", "", nil, "simple", false},
+		{"header explode=true", "header", "", b(true), "simple", true},
+		{"path default", "path", "", nil, "simple", false},
+		{"cookie default", "cookie", "", nil, "form", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &v3high.Parameter{In: tt.in, Style: tt.style, Explode: tt.explode}
+			style, explode := effectiveStyleExplode(p)
+			if style != tt.wantStyle || explode != tt.wantExplode {
+				t.Errorf("effectiveStyleExplode(in=%s style=%q explode=%v) = (%q, %v), want (%q, %v)",
+					tt.in, tt.style, tt.explode, style, explode, tt.wantStyle, tt.wantExplode)
+			}
+		})
+	}
+}
+
 func TestAnalyzeOperations_Petstore(t *testing.T) {
 	specPath := filepath.Join(projectRoot(), "testdata", "petstore.yaml")
 

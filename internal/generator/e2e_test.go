@@ -1315,6 +1315,126 @@ func TestObjectStyles(t *testing.T) {
 `)
 }
 
+// TestE2E_ObjectParamCombosOnTheWire covers the remaining object encodings: form
+// explode=true (top-level keys), form explode=false (flat list), a map-typed
+// (additionalProperties) param, and a simple unexploded header object whose
+// optional nil property is skipped.
+func TestE2E_ObjectParamCombosOnTheWire(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: ObjCombos
+  version: 1.0.0
+paths:
+  /c:
+    get:
+      operationId: getC
+      parameters:
+        - name: page
+          in: query
+          required: true
+          style: form
+          explode: true
+          schema:
+            $ref: '#/components/schemas/Page'
+        - name: q
+          in: query
+          required: true
+          style: form
+          explode: false
+          schema:
+            $ref: '#/components/schemas/Page'
+        - name: tags
+          in: query
+          required: true
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            additionalProperties:
+              type: string
+        - name: X-Flat
+          in: header
+          required: true
+          style: simple
+          explode: false
+          schema:
+            $ref: '#/components/schemas/Meta'
+      responses:
+        '200':
+          description: ok
+components:
+  schemas:
+    Page:
+      type: object
+      required:
+        - size
+        - num
+      properties:
+        size:
+          type: integer
+        num:
+          type: integer
+    Meta:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+        extra:
+          type: string
+`
+	files, _ := generateFromSpec(t, spec, "objcombos")
+	runGeneratedWireTest(t, files, "objcombos", `package objcombos
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestObjectCombos(t *testing.T) {
+	var size, num, q, tagA, tagB, flat string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		size = r.URL.Query().Get("size")
+		num = r.URL.Query().Get("num")
+		q = r.URL.Query().Get("q")
+		tagA = r.URL.Query().Get("tags[a]")
+		tagB = r.URL.Query().Get("tags[b]")
+		flat = r.Header.Get("X-Flat")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	if err := NewClient(srv.URL).GetC(t.Context(), GetCParams{
+		Page: Page{Size: 10, Num: 2},
+		Q:    Page{Size: 10, Num: 2},
+		Tags: map[string]string{"a": "1", "b": "2"},
+		XFlat: Meta{Status: "open"},
+	}); err != nil {
+		t.Fatalf("GetC: %v", err)
+	}
+	// form + explode=true: object properties become top-level query keys.
+	if size != "10" || num != "2" {
+		t.Errorf("form explode=true object = size:%q num:%q, want 10/2", size, num)
+	}
+	// form + explode=false: flat comma list of name,value pairs (order-independent).
+	if !strings.Contains(q, "size,10") || !strings.Contains(q, "num,2") {
+		t.Errorf("form explode=false object q = %q, want size,10 and num,2", q)
+	}
+	// deepObject over a map[string]string.
+	if tagA != "1" || tagB != "2" {
+		t.Errorf("deepObject map = tags[a]:%q tags[b]:%q, want 1/2", tagA, tagB)
+	}
+	// simple unexploded object; the optional nil "extra" property is skipped.
+	if flat != "status,open" {
+		t.Errorf("simple object header X-Flat = %q, want status,open (extra omitted)", flat)
+	}
+}
+`)
+}
+
 // runGeneratedWireTest writes the generated files plus a caller-supplied _test.go
 // into a temp module and runs `go test`, so a serialization bug fails here.
 func runGeneratedWireTest(t *testing.T, files []GeneratedFile, module, testFile string) {
