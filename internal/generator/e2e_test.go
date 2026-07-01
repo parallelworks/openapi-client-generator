@@ -1687,6 +1687,137 @@ func TestNumericEnums(t *testing.T) {
 `)
 }
 
+// TestE2E_StringEnumSpecialCharsAndCollisions covers enum values with characters
+// that are not valid in a Go identifier and values that sanitize to the same
+// identifier: the constants must be unique and compile, and the wire value must be
+// the original spec value.
+func TestE2E_StringEnumSpecialCharsAndCollisions(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: SpecialEnum
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      parameters:
+        - name: s
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/S'
+      responses:
+        '200':
+          description: ok
+components:
+  schemas:
+    S:
+      type: string
+      enum:
+        - in-progress
+        - a-b
+        - a b
+`
+	files, _ := generateFromSpec(t, spec, "specialenum")
+	var types string
+	for _, f := range files {
+		if f.Name == "types.go" {
+			types = string(f.Content)
+		}
+	}
+	// The two values that both sanitize to SAB must get distinct constants, each
+	// keeping its original wire value.
+	if !strings.Contains(types, `SAB S = "a-b"`) || !strings.Contains(types, `SAB2 S = "a b"`) {
+		t.Errorf("colliding enum consts not disambiguated:\n%s", types)
+	}
+	runGeneratedWireTest(t, files, "specialenum", `package specialenum
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestSpecialEnum(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Query().Get("s")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// SInProgress carries the original hyphenated value on the wire.
+	if err := NewClient(srv.URL).GetX(t.Context(), GetXParams{S: SInProgress}); err != nil {
+		t.Fatalf("GetX: %v", err)
+	}
+	if got != "in-progress" {
+		t.Errorf("enum wire value = %q, want in-progress", got)
+	}
+	// The two collided constants are distinct values.
+	if SAB == SAB2 {
+		t.Errorf("collided enum constants have the same value: %q", SAB)
+	}
+}
+`)
+}
+
+// TestE2E_NullableEnumCompiles covers a nullable enum (with a null member in the
+// list): it must generate a compiling client and encode a non-null value.
+func TestE2E_NullableEnumCompiles(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: NullableEnum
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      parameters:
+        - name: color
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/Color'
+      responses:
+        '200':
+          description: ok
+components:
+  schemas:
+    Color:
+      type: string
+      nullable: true
+      enum:
+        - red
+        - green
+        - null
+`
+	files, _ := generateFromSpec(t, spec, "nullableenum")
+	runGeneratedWireTest(t, files, "nullableenum", `package nullableenum
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestNullableEnum(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Query().Get("color")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	if err := NewClient(srv.URL).GetX(t.Context(), GetXParams{Color: ColorRed}); err != nil {
+		t.Fatalf("GetX: %v", err)
+	}
+	if got != "red" {
+		t.Errorf("nullable enum wire value = %q, want red", got)
+	}
+}
+`)
+}
+
 // runGeneratedWireTest writes the generated files plus a caller-supplied _test.go
 // into a temp module and runs `go test`, so a serialization bug fails here.
 func runGeneratedWireTest(t *testing.T, files []GeneratedFile, module, testFile string) {

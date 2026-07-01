@@ -65,6 +65,7 @@ func (a *Analyzer) convertEnum(goName string, schema *highbase.Schema, nullable 
 		IsNullable:  nullable,
 	}
 
+	used := make(map[string]bool)
 	for _, enumNode := range schema.Enum {
 		if enumNode == nil {
 			continue
@@ -73,7 +74,15 @@ func (a *Analyzer) convertEnum(goName string, schema *highbase.Schema, nullable 
 		if val == "" || val == "null" {
 			continue
 		}
-		constName := goName + naming.ToGoName(val)
+		// Different raw values can sanitize to the same Go identifier (e.g. "a-b"
+		// and "a b" both become AB); suffix the later ones so the consts don't
+		// collide and fail to compile. The wire Value keeps the original.
+		base := goName + naming.ToGoName(val)
+		constName := base
+		for i := 2; used[constName]; i++ {
+			constName = base + strconv.Itoa(i)
+		}
+		used[constName] = true
 		td.EnumValues = append(td.EnumValues, &ir.EnumVal{
 			Name:  constName,
 			Value: enumValue(underlyingType, val),
