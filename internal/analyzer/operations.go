@@ -100,7 +100,62 @@ func (a *Analyzer) convertOperation(httpMethod, path string, pathItem *v3high.Pa
 		opDef.SecurityReqs = convertSecurityReqs(op.Security)
 	}
 
+	disambiguateParamNames(opDef)
+
 	return opDef, nil
+}
+
+// disambiguateParamNames renames generated identifiers that would otherwise
+// collide, suffixing by kind; only Go identifiers change, never the wire OrigName.
+func disambiguateParamNames(opDef *ir.OperationDef) {
+	// Reserved: the receiver, args, and method/iterator locals a path param could
+	// shadow, the package identifiers the generated body references (e.g. a param
+	// named `url` would shadow the net/url import in `url.Values{}`), and the
+	// helper functions the method body calls (a param named `add_query_param`
+	// becomes `addQueryParam`, shadowing the helper of that name).
+	posUsed := map[string]bool{
+		"c": true, "ctx": true, "path": true, "queryValues": true,
+		"headers": true, "result": true, "err": true,
+		"cursor": true, "p": true, "next": true,
+		"context": true, "fmt": true, "http": true, "url": true,
+		"pathReplace": true, "addQueryParam": true, "encodeQuery": true,
+		"setHeader": true, "addCookieHeader": true,
+	}
+	if opDef.RequestBody != nil {
+		posUsed["body"] = true
+	}
+	if len(opDef.QueryParams) > 0 || len(opDef.HeaderParams) > 0 || len(opDef.CookieParams) > 0 {
+		posUsed["params"] = true
+		posUsed["opts"] = true
+	}
+	for _, p := range opDef.PathParams {
+		name := p.Name
+		for posUsed[name] {
+			name += "Path"
+		}
+		posUsed[name] = true
+		p.Name = name
+	}
+
+	// Query, header, and cookie params share one struct, so dedupe field names by location.
+	fieldUsed := map[string]bool{}
+	dedupeField := func(p *ir.ParamDef, suffix string) {
+		name := p.FieldName
+		for fieldUsed[name] {
+			name += suffix
+		}
+		fieldUsed[name] = true
+		p.FieldName = name
+	}
+	for _, p := range opDef.QueryParams {
+		dedupeField(p, "Query")
+	}
+	for _, p := range opDef.HeaderParams {
+		dedupeField(p, "Header")
+	}
+	for _, p := range opDef.CookieParams {
+		dedupeField(p, "Cookie")
+	}
 }
 
 // operationName determines the Go method name for an operation.
@@ -165,7 +220,7 @@ func (a *Analyzer) convertParam(param *v3high.Parameter) (*ir.ParamDef, error) {
 	}
 
 	required := param.Required != nil && *param.Required
-	explode := param.Explode != nil && *param.Explode
+	style, explode := effectiveStyleExplode(param)
 
 	return &ir.ParamDef{
 		Name:        naming.ToGoParamName(param.Name),
@@ -176,9 +231,30 @@ func (a *Analyzer) convertParam(param *v3high.Parameter) (*ir.ParamDef, error) {
 		Required:    required,
 		Description: param.Description,
 		Deprecated:  param.Deprecated,
-		Style:       param.Style,
+		Style:       style,
 		Explode:     explode,
 	}, nil
+}
+
+// effectiveStyleExplode resolves the OpenAPI serialization defaults: style is
+// form for query/cookie and simple for path/header when unset; explode defaults
+// to true only for form. The raw param.Explode is false when omitted, which would
+// wrongly collapse an ordinary form array — so the default must be applied here.
+func effectiveStyleExplode(param *v3high.Parameter) (string, bool) {
+	style := param.Style
+	if style == "" {
+		switch param.In {
+		case "query", "cookie":
+			style = "form"
+		default:
+			style = "simple"
+		}
+	}
+	explode := style == "form"
+	if param.Explode != nil {
+		explode = *param.Explode
+	}
+	return style, explode
 }
 
 // convertRequestBody converts an OpenAPI request body to an ir.RequestBodyDef.

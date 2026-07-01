@@ -1,8 +1,11 @@
 package analyzer
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	highbase "github.com/pb33f/libopenapi/datamodel/high/base"
@@ -56,6 +59,18 @@ func (a *Analyzer) convertSchema(goName, specName string, schema *highbase.Schem
 func (a *Analyzer) convertEnum(goName string, schema *highbase.Schema, nullable bool) (*ir.TypeDef, error) {
 	underlyingType := goTypeForPrimitive(primaryType(schema), schema.Format)
 
+	// An enum over a type Go can't declare constants of (time.Time, []byte, any)
+	// carries no useful named values, so emit a plain alias with no const block.
+	if !constableType(underlyingType) {
+		return &ir.TypeDef{
+			Name:        goName,
+			Description: schema.Description,
+			Kind:        ir.TypeKindAlias,
+			GoType:      underlyingType,
+			IsNullable:  nullable,
+		}, nil
+	}
+
 	td := &ir.TypeDef{
 		Name:        goName,
 		Description: schema.Description,
@@ -65,21 +80,77 @@ func (a *Analyzer) convertEnum(goName string, schema *highbase.Schema, nullable 
 	}
 
 	for _, enumNode := range schema.Enum {
-		if enumNode == nil {
+		if enumNode == nil || enumNode.Tag == "!!null" {
 			continue
 		}
-		val := enumNode.Value
-		if val == "" || val == "null" {
+		raw := enumNode.Value
+		// Skip a value that has no valid Go constant literal for this type (an
+		// out-of-range, NaN/Inf, or non-numeric member of a numeric enum); the
+		// generated code must always compile.
+		literal, ok := enumConstLiteral(underlyingType, raw)
+		if !ok {
 			continue
 		}
-		constName := goName + naming.ToGoName(val)
+		// RegisterName keeps the const unique against package types/other consts —
+		// two values that sanitize to the same identifier ("a-b"/"a b"), or a const
+		// that matches a schema-named type, would otherwise fail to compile.
+		constName := a.namer.RegisterName(goName + naming.ToGoName(raw))
 		td.EnumValues = append(td.EnumValues, &ir.EnumVal{
-			Name:  constName,
-			Value: val,
+			Name:    constName,
+			Literal: literal,
 		})
 	}
 
 	return td, nil
+}
+
+// constableType reports whether Go can declare a typed constant of goType (the
+// const-able primitives goTypeForPrimitive produces; time.Time/[]byte/any are not).
+func constableType(goType string) bool {
+	switch goType {
+	case "string", "bool", "int32", "int64", "float32", "float64":
+		return true
+	}
+	return false
+}
+
+// enumConstLiteral renders a raw enum scalar (always a YAML string) as a Go
+// constant literal for goType, returning ok=false when the value can't be
+// represented (out of range, NaN/Inf, or unparseable), so the caller skips it.
+func enumConstLiteral(goType, raw string) (string, bool) {
+	switch goType {
+	case "string":
+		return strconv.Quote(raw), true
+	case "bool":
+		if b, err := strconv.ParseBool(raw); err == nil {
+			return strconv.FormatBool(b), true
+		}
+	case "int32", "int64":
+		bits := 64
+		if goType == "int32" {
+			bits = 32
+		}
+		// Base 10 first so a leading-zero decimal (010) stays decimal; fall back to
+		// base 0 only on a syntax error (hex/octal/underscored like 0x1F/0o17),
+		// never on ErrRange — an overflowing value must be dropped, not reread as
+		// octal.
+		n, err := strconv.ParseInt(raw, 10, bits)
+		if errors.Is(err, strconv.ErrSyntax) {
+			n, err = strconv.ParseInt(raw, 0, bits)
+		}
+		if err == nil {
+			return strconv.FormatInt(n, 10), true
+		}
+	case "float32", "float64":
+		bits := 64
+		if goType == "float32" {
+			bits = 32
+		}
+		if f, err := strconv.ParseFloat(raw, bits); err == nil && !math.IsInf(f, 0) && !math.IsNaN(f) {
+			return strconv.FormatFloat(f, 'f', -1, bits), true
+		}
+	}
+	return "", false
 }
 
 // convertAllOf creates a struct TypeDef from an allOf composition.

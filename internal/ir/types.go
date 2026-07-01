@@ -28,14 +28,14 @@ func (k TypeKind) String() string {
 
 // TypeDef represents a Go type to be generated.
 type TypeDef struct {
-	Name          string           // Go type name (PascalCase)
-	Description   string           // GoDoc comment
-	Kind          TypeKind         // Struct, Alias, Enum, Union
-	GoType        string           // For aliases: the underlying Go type string
-	Fields        []*Field         // For structs
-	EnumValues    []*EnumVal       // For enums
-	EnumGoType    string           // For enums: the underlying Go type (e.g., "string", "int")
-	UnionTypes    []*UnionVariant  // For oneOf/anyOf unions
+	Name          string            // Go type name (PascalCase)
+	Description   string            // GoDoc comment
+	Kind          TypeKind          // Struct, Alias, Enum, Union
+	GoType        string            // For aliases: the underlying Go type string
+	Fields        []*Field          // For structs
+	EnumValues    []*EnumVal        // For enums
+	EnumGoType    string            // For enums: the underlying Go type (e.g., "string", "int")
+	UnionTypes    []*UnionVariant   // For oneOf/anyOf unions
 	Discriminator *DiscriminatorDef // If polymorphic via discriminator
 	IsNullable    bool
 }
@@ -57,8 +57,8 @@ type Field struct {
 
 // EnumVal represents one value in an enum type.
 type EnumVal struct {
-	Name  string      // Go const name (e.g., PetStatusAvailable)
-	Value any // The actual enum value
+	Name    string // Go const name (e.g., PetStatusAvailable)
+	Literal string // Rendered Go constant literal (quoted for strings)
 }
 
 // UnionVariant represents one arm of a oneOf/anyOf union.

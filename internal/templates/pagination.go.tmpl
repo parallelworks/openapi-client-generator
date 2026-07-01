@@ -62,18 +62,20 @@ func (it *PageIterator[T]) ForEach(fn func(T) error) error {
 	}
 }
 {{ range .Operations }}{{ if .Pagination }}{{ if eq .Pagination.Style 0 }}
+{{- $hasReqParam := or (hasRequiredQueryParams .) (hasRequiredHeaderParams .) (hasRequiredCookieParams .) }}
 // {{ .Name }}Iter returns an iterator over paginated {{ .Name }} results.
-func (c *Client) {{ .Name }}Iter(ctx context.Context{{ range .PathParams }}, {{ .Name }} {{ .Type }}{{ end }}{{ if hasOptionalParams . }}, opts ...{{ .Name }}Params{{ end }}) *PageIterator[{{ paginationItemType . }}] {
+func (c *Client) {{ .Name }}Iter(ctx context.Context{{ range .PathParams }}, {{ .Name }} {{ .Type }}{{ end }}{{ if hasBody . }}, body {{ if .RequestBody }}{{ if not .RequestBody.Required }}*{{ end }}{{ .RequestBody.TypeName }}{{ else }}any{{ end }}{{ end }}{{ if $hasReqParam }}, params {{ .Name }}Params{{ else }}, opts ...{{ .Name }}Params{{ end }}) *PageIterator[{{ paginationItemType . }}] {
 	return &PageIterator[{{ paginationItemType . }}]{
 		fetch: func(cursor string) ([]{{ paginationItemType . }}, string, error) {
-			p := {{ .Name }}Params{}
-			{{ if hasOptionalParams . }}if len(opts) > 0 {
+			{{ if $hasReqParam }}p := params
+			{{ else }}p := {{ .Name }}Params{}
+			if len(opts) > 0 {
 				p = opts[0]
 			}
 			{{ end }}if cursor != "" {
 				p.{{ paginationCursorField . }} = &cursor
 			}
-			result, err := c.{{ .Name }}(ctx{{ range .PathParams }}, {{ .Name }}{{ end }}, p)
+			result, err := c.{{ .Name }}(ctx{{ range .PathParams }}, {{ .Name }}{{ end }}{{ if hasBody . }}, body{{ end }}, p)
 			if err != nil {
 				return nil, "", err
 			}

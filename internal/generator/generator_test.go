@@ -44,9 +44,9 @@ func TestGenerate_StructAndEnum(t *testing.T) {
 				Kind:        ir.TypeKindEnum,
 				EnumGoType:  "string",
 				EnumValues: []*ir.EnumVal{
-					{Name: "PetStatusAvailable", Value: "available"},
-					{Name: "PetStatusPending", Value: "pending"},
-					{Name: "PetStatusSold", Value: "sold"},
+					{Name: "PetStatusAvailable", Literal: `"available"`},
+					{Name: "PetStatusPending", Literal: `"pending"`},
+					{Name: "PetStatusSold", Literal: `"sold"`},
 				},
 			},
 		},
@@ -478,90 +478,6 @@ func TestJsonTag(t *testing.T) {
 	}
 }
 
-func TestHasOptionalQueryParams(t *testing.T) {
-	tests := []struct {
-		name string
-		op   *ir.OperationDef
-		want bool
-	}{
-		{
-			name: "no params",
-			op:   &ir.OperationDef{},
-			want: false,
-		},
-		{
-			name: "only required query params",
-			op: &ir.OperationDef{
-				QueryParams: []*ir.ParamDef{{Name: "id", Required: true}},
-			},
-			want: false,
-		},
-		{
-			name: "optional query param",
-			op: &ir.OperationDef{
-				QueryParams: []*ir.ParamDef{{Name: "limit", Required: false}},
-			},
-			want: true,
-		},
-		{
-			name: "only header params",
-			op: &ir.OperationDef{
-				HeaderParams: []*ir.ParamDef{{Name: "X-Request-Id", Required: false}},
-			},
-			want: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := hasOptionalQueryParams(tt.op); got != tt.want {
-				t.Errorf("hasOptionalQueryParams() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestHasOptionalHeaderParams(t *testing.T) {
-	tests := []struct {
-		name string
-		op   *ir.OperationDef
-		want bool
-	}{
-		{
-			name: "no params",
-			op:   &ir.OperationDef{},
-			want: false,
-		},
-		{
-			name: "only query params",
-			op: &ir.OperationDef{
-				QueryParams: []*ir.ParamDef{{Name: "limit", Required: false}},
-			},
-			want: false,
-		},
-		{
-			name: "optional header param",
-			op: &ir.OperationDef{
-				HeaderParams: []*ir.ParamDef{{Name: "X-Request-Id", Required: false}},
-			},
-			want: true,
-		},
-		{
-			name: "only required header params",
-			op: &ir.OperationDef{
-				HeaderParams: []*ir.ParamDef{{Name: "X-Request-Id", Required: true}},
-			},
-			want: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := hasOptionalHeaderParams(tt.op); got != tt.want {
-				t.Errorf("hasOptionalHeaderParams() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestSuccessContentType(t *testing.T) {
 	tests := []struct {
 		name string
@@ -601,25 +517,6 @@ func TestSuccessContentType(t *testing.T) {
 				t.Errorf("successContentType() = %q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestEnumLiteral(t *testing.T) {
-	tests := []struct {
-		val  *ir.EnumVal
-		want string
-	}{
-		{&ir.EnumVal{Name: "X", Value: "hello"}, `"hello"`},
-		{&ir.EnumVal{Name: "X", Value: float64(42)}, "42"},
-		{&ir.EnumVal{Name: "X", Value: float64(3.14)}, "3.14"},
-		{&ir.EnumVal{Name: "X", Value: true}, "true"},
-		{&ir.EnumVal{Name: "X", Value: int64(99)}, "99"},
-	}
-	for _, tt := range tests {
-		got := enumLiteral(tt.val)
-		if got != tt.want {
-			t.Errorf("enumLiteral(%v) = %q, want %q", tt.val.Value, got, tt.want)
-		}
 	}
 }
 
@@ -822,11 +719,11 @@ func TestGenerate_DeprecatedOperation(t *testing.T) {
 		},
 		Operations: []*ir.OperationDef{
 			{
-				Name:        "OldMethod",
-				Summary:     "An old method",
-				HTTPMethod:  "GET",
-				Path:        "/old",
-				Deprecated:  true,
+				Name:       "OldMethod",
+				Summary:    "An old method",
+				HTTPMethod: "GET",
+				Path:       "/old",
+				Deprecated: true,
 				SuccessResponse: &ir.ResponseDef{
 					StatusCode:  "200",
 					ContentType: "application/json",

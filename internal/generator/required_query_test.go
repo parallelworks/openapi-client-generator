@@ -58,8 +58,9 @@ func TestGenerate_RequiredQueryParam_Compiles(t *testing.T) {
 					{Name: "id", FieldName: "ID", OrigName: "id", Location: "path", Type: "string", Required: true},
 				},
 				QueryParams: []*ir.ParamDef{
-					{Name: "startDate", FieldName: "StartDate", OrigName: "startDate", Location: "query", Type: "string", Required: true},
-					{Name: "endDate", FieldName: "EndDate", OrigName: "endDate", Location: "query", Type: "string", Required: false},
+					{Name: "startDate", FieldName: "StartDate", OrigName: "startDate", Location: "query", Type: "string", Required: true, Style: "form", Explode: true},
+					{Name: "tags", FieldName: "Tags", OrigName: "tags", Location: "query", Type: "[]string", Required: true, Style: "form", Explode: true},
+					{Name: "endDate", FieldName: "EndDate", OrigName: "endDate", Location: "query", Type: "string", Required: false, Style: "form", Explode: true},
 				},
 			},
 		},
@@ -84,26 +85,39 @@ func TestGenerate_RequiredQueryParam_Compiles(t *testing.T) {
 		t.Fatal("operations.go not generated")
 	}
 
-	// The required query param must be a positional argument, not a struct field.
-	if !strings.Contains(ops, "startDate string") {
-		t.Errorf("required query param missing from method signature:\n%s", ops)
+	// A required param is a value field in the params struct (not a pointer), and
+	// because the op has a required param the struct is a mandatory argument.
+	if !strings.Contains(ops, "StartDate string `json:\"startDate\"`") {
+		t.Errorf("required query param not a value field in the params struct:\n%s", ops)
 	}
-	if strings.Contains(ops, "StartDate") {
-		t.Errorf("required query param leaked into the params struct (StartDate):\n%s", ops)
+	if !strings.Contains(ops, "params GetUsageSummaryParams)") {
+		t.Errorf("required param did not make the params struct a mandatory argument:\n%s", ops)
 	}
-	// The required param must be encoded unconditionally (from the positional arg).
-	if !strings.Contains(ops, `addQueryParam(queryValues, "startDate", startDate)`) {
+	// Required and optional params alike are encoded via addQueryParam, which sends
+	// any present value (a nil optional pointer is the only thing it skips), so a
+	// required param — and an explicitly-set optional zero value — always reaches
+	// the server.
+	if !strings.Contains(ops, `addQueryParam(queryValues, "startDate", "form", true, params.StartDate)`) {
 		t.Errorf("required query param not encoded into the query string:\n%s", ops)
 	}
-	// The optional param stays in the params struct and is encoded from opts.
+	// A required slice param is a value []T field, encoded as repeated keys.
+	if !strings.Contains(ops, "Tags []string `json:\"tags\"`") {
+		t.Errorf("required slice query param not a value field in the params struct:\n%s", ops)
+	}
+	if !strings.Contains(ops, `addQueryParam(queryValues, "tags", "form", true, params.Tags)`) {
+		t.Errorf("required slice query param not encoded into the query string:\n%s", ops)
+	}
+	// The optional param is a pointer field, also encoded via addQueryParam.
 	if !strings.Contains(ops, "EndDate *string") {
 		t.Errorf("optional query param missing from params struct:\n%s", ops)
 	}
-	if !strings.Contains(ops, `addQueryParam(queryValues, "endDate", params.EndDate)`) {
-		t.Errorf("optional query param not encoded from opts:\n%s", ops)
+	if !strings.Contains(ops, `addQueryParam(queryValues, "endDate", "form", true, params.EndDate)`) {
+		t.Errorf("optional query param not encoded from params:\n%s", ops)
 	}
 
-	// The whole generated package must compile.
+	// The whole generated package must compile, and the param encoder must keep
+	// zero values (a required param dropped from the URL makes the server reject
+	// the request as missing a required parameter).
 	tmpDir := t.TempDir()
 	goMod := []byte("module reqquery-e2e-test\n\ngo 1.25.5\n")
 	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), goMod, 0o644); err != nil {
@@ -112,12 +126,68 @@ func TestGenerate_RequiredQueryParam_Compiles(t *testing.T) {
 	if err := WriteFiles(tmpDir, files); err != nil {
 		t.Fatalf("WriteFiles: %v", err)
 	}
-	cmd := exec.Command("go", "build", "./...")
+	// A generated unit test that exercises addQueryParam directly, proving a
+	// required value and an explicitly-set optional zero value are both encoded.
+	zeroTest := []byte(`package reqquery
+
+import (
+	"net/url"
+	"testing"
+)
+
+func ptr[T any](v T) *T { return &v }
+
+// A required param (a plain value) must always be encoded, even at its zero value.
+func TestAddQueryParamKeepsRequiredZeroValues(t *testing.T) {
+	for _, v := range []any{0, false, ""} {
+		vals := url.Values{}
+		addQueryParam(vals, "k", "form", true, v)
+		if _, ok := vals["k"]; !ok {
+			t.Errorf("addQueryParam dropped required zero value %#v; required params must always be encoded", v)
+		}
+	}
+}
+
+// An optional param is a pointer: a non-nil pointer means "explicitly set", so an
+// explicit zero value must be sent — only a nil pointer is skipped.
+func TestAddQueryParamSendsExplicitOptionalZeroValues(t *testing.T) {
+	for _, v := range []any{ptr(0), ptr(false), ptr("")} {
+		vals := url.Values{}
+		addQueryParam(vals, "k", "form", true, v)
+		if _, ok := vals["k"]; !ok {
+			t.Errorf("addQueryParam dropped explicitly-set optional zero value %#v", v)
+		}
+	}
+	var nilPtr *int
+	vals := url.Values{}
+	addQueryParam(vals, "k", "form", true, nilPtr)
+	if _, ok := vals["k"]; ok {
+		t.Error("addQueryParam encoded an unset (nil) optional param")
+	}
+}
+
+func TestQueryParamsEncodeSlicesAsRepeatedKeys(t *testing.T) {
+	vals := url.Values{}
+	addQueryParam(vals, "ids", "form", true, []string{"a", "b", "c"})
+	if got := vals["ids"]; len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {
+		t.Errorf("addQueryParam([]string) = %#v; want repeated keys [a b c]", got)
+	}
+	vals = url.Values{}
+	addQueryParam(vals, "nums", "form", true, []int{1, 2, 3})
+	if got := vals["nums"]; len(got) != 3 || got[0] != "1" || got[2] != "3" {
+		t.Errorf("addQueryParam([]int) = %#v; want repeated keys [1 2 3]", got)
+	}
+}
+`)
+	if err := os.WriteFile(filepath.Join(tmpDir, "zero_value_test.go"), zeroTest, 0o644); err != nil {
+		t.Fatalf("writing zero_value_test.go: %v", err)
+	}
+	cmd := exec.Command("go", "test", "./...")
 	cmd.Dir = tmpDir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		for _, f := range files {
 			t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
 		}
-		t.Fatalf("generated code with a required query param failed to compile: %v\n%s", err, string(output))
+		t.Fatalf("generated code with a required query param failed to build/test: %v\n%s", err, string(output))
 	}
 }

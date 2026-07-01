@@ -3,33 +3,353 @@
 package {{ .Name }}
 
 import (
+	"encoding/base64"
 	"fmt"
+	"net/http"
 	"net/url"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
-// pathReplace replaces a {param} placeholder in a URL path with the given value.
-func pathReplace(path, param string, value any) string {
-	return strings.Replace(path, "{"+param+"}", fmt.Sprintf("%v", value), 1)
+// pathReplace substitutes a {param} placeholder in a URL path, encoding the value
+// with its RFC 6570 path style (simple/label/matrix) and percent-escaping each
+// component so reserved characters stay within one segment.
+func pathReplace(path, param, style string, explode bool, value any) string {
+	v := ""
+	if rv, ok := derefParam(value); ok {
+		v = encodePath(param, style, explode, rv)
+	}
+	return strings.Replace(path, "{"+param+"}", v, 1)
 }
 
-// addQueryParam adds a non-zero-value query parameter.
-// It handles pointer types by dereferencing them before formatting.
-func addQueryParam(values url.Values, key string, value any) {
+// derefParam unwraps one pointer level, returning ok=false for a nil interface
+// or nil pointer (a value to skip).
+func derefParam(value any) (reflect.Value, bool) {
 	if value == nil {
-		return
+		return reflect.Value{}, false
 	}
-	// Dereference pointer types to get the underlying value.
 	rv := reflect.ValueOf(value)
 	if rv.Kind() == reflect.Pointer {
 		if rv.IsNil() {
+			return reflect.Value{}, false
+		}
+		rv = rv.Elem()
+	}
+	return rv, true
+}
+
+// isSlice reports whether rv is a multi-value slice; a []byte is a scalar
+// (formatScalar renders it as base64), not a list of bytes.
+func isSlice(rv reflect.Value) bool {
+	return rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() != reflect.Uint8
+}
+
+// isObject reports whether rv is a struct or map to serialize property-by-property;
+// a time.Time is a scalar, not an object.
+func isObject(rv reflect.Value) bool {
+	switch rv.Kind() {
+	case reflect.Map:
+		return true
+	case reflect.Struct:
+		_, isTime := rv.Interface().(time.Time)
+		return !isTime
+	}
+	return false
+}
+
+// formatScalar renders a single value: time.Time as RFC 3339, a byte slice
+// (OpenAPI format:byte) as base64, floats as plain decimals (never scientific
+// notation), everything else with default formatting. Kind is checked rather than
+// the concrete type so a defined type (e.g. `type Weight float64` from a number
+// enum) is still formatted correctly.
+func formatScalar(rv reflect.Value) string {
+	if t, ok := rv.Interface().(time.Time); ok {
+		return t.Format(time.RFC3339)
+	}
+	switch rv.Kind() {
+	case reflect.Slice:
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return base64.StdEncoding.EncodeToString(rv.Bytes())
+		}
+	case reflect.Float32:
+		return strconv.FormatFloat(rv.Float(), 'f', -1, 32)
+	case reflect.Float64:
+		return strconv.FormatFloat(rv.Float(), 'f', -1, 64)
+	}
+	return fmt.Sprintf("%v", rv.Interface())
+}
+
+// formatValue renders a value that may be a scalar or a flattened collection: a
+// slice becomes a comma list, an object a comma list of its property values,
+// everything else a scalar. An interface element (from a []any) is unwrapped first.
+func formatValue(rv reflect.Value) string {
+	if rv.Kind() == reflect.Interface {
+		if rv.IsNil() {
+			return ""
+		}
+		rv = rv.Elem()
+	}
+	switch {
+	case isSlice(rv):
+		return strings.Join(sliceValues(rv), ",")
+	case isObject(rv):
+		flat := make([]string, 0)
+		for _, p := range objectPairs(rv) {
+			flat = append(flat, p[0], p[1])
+		}
+		return strings.Join(flat, ",")
+	default:
+		return formatScalar(rv)
+	}
+}
+
+// sliceValues renders each element of a slice, flattening nested collections.
+func sliceValues(rv reflect.Value) []string {
+	out := make([]string, rv.Len())
+	for i := range out {
+		out[i] = formatValue(rv.Index(i))
+	}
+	return out
+}
+
+// objectPairs returns an object's (property, value) pairs in a stable order:
+// struct fields in declaration order keyed by their json tag (an embedded field's
+// properties are flattened in), map keys sorted. A nil pointer property is skipped.
+func objectPairs(rv reflect.Value) [][2]string {
+	var pairs [][2]string
+	switch rv.Kind() {
+	case reflect.Struct:
+		t := rv.Type()
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			if f.PkgPath != "" {
+				continue
+			}
+			fv, ok := derefParam(rv.Field(i).Interface())
+			if !ok {
+				continue
+			}
+			if f.Anonymous && isObject(fv) {
+				pairs = append(pairs, objectPairs(fv)...)
+				continue
+			}
+			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			if name == "" {
+				name = f.Name
+			}
+			if name == "-" {
+				continue
+			}
+			pairs = append(pairs, [2]string{name, formatValue(fv)})
+		}
+	case reflect.Map:
+		keys := make([]string, 0, rv.Len())
+		byKey := make(map[string]reflect.Value, rv.Len())
+		for _, k := range rv.MapKeys() {
+			s := fmt.Sprintf("%v", k.Interface())
+			keys = append(keys, s)
+			byKey[s] = rv.MapIndex(k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if fv, ok := derefParam(byKey[k].Interface()); ok {
+				pairs = append(pairs, [2]string{k, formatValue(fv)})
+			}
+		}
+	}
+	return pairs
+}
+
+// addQueryParam encodes one query parameter under its OpenAPI style/explode. A nil
+// optional pointer is skipped, but a present zero value (0/false/"") is sent — the
+// pointer already signals "unset".
+func addQueryParam(values url.Values, key, style string, explode bool, value any) {
+	rv, ok := derefParam(value)
+	if !ok {
+		return
+	}
+	switch {
+	case isObject(rv):
+		pairs := objectPairs(rv)
+		if len(pairs) == 0 {
 			return
 		}
-		value = rv.Elem().Interface()
+		switch {
+		case style == "deepObject":
+			for _, p := range pairs {
+				values.Set(key+"["+p[0]+"]", p[1])
+			}
+		case explode:
+			for _, p := range pairs {
+				values.Set(p[0], p[1])
+			}
+		default:
+			flat := make([]string, 0, len(pairs)*2)
+			for _, p := range pairs {
+				flat = append(flat, p[0], p[1])
+			}
+			values.Set(key, strings.Join(flat, ","))
+		}
+	case isSlice(rv):
+		elems := sliceValues(rv)
+		if len(elems) == 0 {
+			return
+		}
+		if explode {
+			for _, e := range elems {
+				values.Add(key, e)
+			}
+			return
+		}
+		values.Set(key, strings.Join(elems, queryDelim(style)))
+	default:
+		values.Set(key, formatScalar(rv))
 	}
-	s := fmt.Sprintf("%v", value)
-	if s != "" && s != "0" && s != "false" {
-		values.Set(key, s)
+}
+
+// encodeQuery renders the query string. url.Values.Encode escapes a space as '+'
+// (form encoding), but spaceDelimited params — and any value with a space — need
+// the RFC 3986 '%20', so rewrite '+' to it. This is safe because Encode emits a
+// literal '+' only for a space; a '+' in the data is already escaped as '%2B'.
+func encodeQuery(values url.Values) string {
+	return strings.ReplaceAll(values.Encode(), "+", "%20")
+}
+
+// queryDelim is the separator for an unexploded array under a query style.
+func queryDelim(style string) string {
+	switch style {
+	case "spaceDelimited":
+		return " "
+	case "pipeDelimited":
+		return "|"
+	default:
+		return ","
+	}
+}
+
+// encodeSimple renders a value in the simple style (header params): a scalar
+// as-is, an array comma-joined, an object as a flat comma list of property/value,
+// or "prop=value" pairs when exploded.
+func encodeSimple(rv reflect.Value, explode bool) string {
+	switch {
+	case isObject(rv):
+		pairs := objectPairs(rv)
+		parts := make([]string, 0, len(pairs))
+		for _, p := range pairs {
+			if explode {
+				parts = append(parts, p[0]+"="+p[1])
+			} else {
+				parts = append(parts, p[0], p[1])
+			}
+		}
+		return strings.Join(parts, ",")
+	case isSlice(rv):
+		return strings.Join(sliceValues(rv), ",")
+	default:
+		return formatScalar(rv)
+	}
+}
+
+// pathEscape percent-encodes a path component, additionally escaping '=' so a
+// value can't be mistaken for a matrix/label key=value separator.
+func pathEscape(s string) string {
+	return strings.ReplaceAll(url.PathEscape(s), "=", "%3D")
+}
+
+// encodePath renders a path parameter per RFC 6570 (simple/label/matrix),
+// percent-escaping each component so reserved characters stay in one segment.
+func encodePath(name, style string, explode bool, rv reflect.Value) string {
+	var items [][2]string // (key, value); key empty for scalars and array elements
+	switch {
+	case isObject(rv):
+		for _, p := range objectPairs(rv) {
+			items = append(items, [2]string{pathEscape(p[0]), pathEscape(p[1])})
+		}
+	case isSlice(rv):
+		for _, v := range sliceValues(rv) {
+			items = append(items, [2]string{"", pathEscape(v)})
+		}
+	default:
+		items = append(items, [2]string{"", pathEscape(formatScalar(rv))})
+	}
+	// An empty list/object expands to nothing (RFC 6570 §2.3), so no prefix.
+	if len(items) == 0 {
+		return ""
+	}
+
+	switch style {
+	case "label":
+		return "." + strings.Join(pathTokens(items, explode), pathSep(explode, "."))
+	case "matrix":
+		if explode {
+			var b strings.Builder
+			for _, t := range items {
+				b.WriteString(";")
+				if t[0] != "" {
+					b.WriteString(t[0] + "=" + t[1])
+				} else {
+					b.WriteString(name + "=" + t[1])
+				}
+			}
+			return b.String()
+		}
+		return ";" + name + "=" + strings.Join(pathTokens(items, false), ",")
+	default: // simple
+		return strings.Join(pathTokens(items, explode), pathSep(explode, ","))
+	}
+}
+
+// pathTokens flattens (key,value) items: bare values for arrays/scalars, "key=value"
+// when an object is exploded, else "key,value" pairs.
+func pathTokens(items [][2]string, explode bool) []string {
+	var out []string
+	for _, t := range items {
+		switch {
+		case t[0] == "":
+			out = append(out, t[1])
+		case explode:
+			out = append(out, t[0]+"="+t[1])
+		default:
+			out = append(out, t[0], t[1])
+		}
+	}
+	return out
+}
+
+// pathSep is the separator between exploded items for a style (label uses ".",
+// simple ",").
+func pathSep(explode bool, exploded string) string {
+	if explode {
+		return exploded
+	}
+	return ","
+}
+
+// setHeader sets a header parameter (simple style), skipping a nil optional
+// pointer.
+func setHeader(headers http.Header, name string, explode bool, value any) {
+	rv, ok := derefParam(value)
+	if !ok {
+		return
+	}
+	headers.Set(name, encodeSimple(rv, explode))
+}
+
+// addCookieHeader appends a cookie to the Cookie header, skipping nil optional
+// values. A Cookie header is a single name=value, so arrays and objects are
+// flattened (form style, unexploded); http.Cookie sanitizes invalid octets.
+func addCookieHeader(headers http.Header, name string, value any) {
+	rv, ok := derefParam(value)
+	if !ok {
+		return
+	}
+	cookie := (&http.Cookie{Name: name, Value: encodeSimple(rv, false)}).String()
+	if existing := headers.Get("Cookie"); existing != "" {
+		headers.Set("Cookie", existing+"; "+cookie)
+	} else {
+		headers.Set("Cookie", cookie)
 	}
 }
