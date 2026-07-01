@@ -1581,6 +1581,112 @@ paths:
 	}
 }
 
+// TestE2E_NumericEnumsCompileAndEncode guards enum-constant rendering: a number
+// or integer enum must emit unquoted numeric literals (a quoted string won't
+// compile against a float/int type), and the values must encode as plain decimals
+// on the wire.
+func TestE2E_NumericEnumsCompileAndEncode(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: Enums
+  version: 1.0.0
+paths:
+  /m:
+    get:
+      operationId: getM
+      parameters:
+        - name: weight
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/Weight'
+        - name: priority
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/Priority'
+        - name: status
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/Status'
+      responses:
+        '200':
+          description: ok
+components:
+  schemas:
+    Weight:
+      type: number
+      format: double
+      enum:
+        - 1000000
+        - 0.5
+    Priority:
+      type: integer
+      enum:
+        - 1
+        - 2
+    Status:
+      type: string
+      enum:
+        - open
+        - closed
+`
+	files, _ := generateFromSpec(t, spec, "enums")
+	var types string
+	for _, f := range files {
+		if f.Name == "types.go" {
+			types = string(f.Content)
+		}
+	}
+	// Numeric enum constants are unquoted; string enum constants stay quoted.
+	if !strings.Contains(types, "Weight = 1000000") || strings.Contains(types, `Weight = "1000000"`) {
+		t.Errorf("number enum constant should be an unquoted literal:\n%s", types)
+	}
+	if !strings.Contains(types, "Priority = 2") || strings.Contains(types, `Priority = "2"`) {
+		t.Errorf("integer enum constant should be an unquoted literal:\n%s", types)
+	}
+	if !strings.Contains(types, `Status = "open"`) {
+		t.Errorf("string enum constant should stay quoted:\n%s", types)
+	}
+	runGeneratedWireTest(t, files, "enums", `package enums
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestNumericEnums(t *testing.T) {
+	var weight, priority, status string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		weight = r.URL.Query().Get("weight")
+		priority = r.URL.Query().Get("priority")
+		status = r.URL.Query().Get("status")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	if err := NewClient(srv.URL).GetM(t.Context(), GetMParams{
+		Weight:   Weight(1000000),
+		Priority: Priority(2),
+		Status:   Status("open"),
+	}); err != nil {
+		t.Fatalf("GetM: %v", err)
+	}
+	if weight != "1000000" {
+		t.Errorf("number enum weight = %q, want 1000000 (plain decimal)", weight)
+	}
+	if priority != "2" {
+		t.Errorf("integer enum priority = %q, want 2", priority)
+	}
+	if status != "open" {
+		t.Errorf("string enum status = %q, want open", status)
+	}
+}
+`)
+}
+
 // runGeneratedWireTest writes the generated files plus a caller-supplied _test.go
 // into a temp module and runs `go test`, so a serialization bug fails here.
 func runGeneratedWireTest(t *testing.T, files []GeneratedFile, module, testFile string) {

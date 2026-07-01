@@ -3,6 +3,7 @@ package analyzer
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	highbase "github.com/pb33f/libopenapi/datamodel/high/base"
@@ -75,11 +76,32 @@ func (a *Analyzer) convertEnum(goName string, schema *highbase.Schema, nullable 
 		constName := goName + naming.ToGoName(val)
 		td.EnumValues = append(td.EnumValues, &ir.EnumVal{
 			Name:  constName,
-			Value: val,
+			Value: enumValue(underlyingType, val),
 		})
 	}
 
 	return td, nil
+}
+
+// enumValue converts a raw enum scalar (always a YAML string) to the typed value
+// its Go type expects, so a numeric or boolean enum renders as an unquoted literal
+// instead of a string that would not compile against a float/int/bool type.
+func enumValue(goType, raw string) any {
+	switch goType {
+	case "float32", "float64":
+		if f, err := strconv.ParseFloat(raw, 64); err == nil {
+			return f
+		}
+	case "int", "int32", "int64":
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			return n
+		}
+	case "bool":
+		if b, err := strconv.ParseBool(raw); err == nil {
+			return b
+		}
+	}
+	return raw
 }
 
 // convertAllOf creates a struct TypeDef from an allOf composition.
