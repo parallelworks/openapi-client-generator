@@ -89,15 +89,12 @@ func (a *Analyzer) analyzeComponentSchemas(pkg *ir.Package) error {
 	// ColorRed vs a ColorRed schema) yields the numeric suffix to the const, not to
 	// the user's public API type.
 	type pendingSchema struct {
+		name   string
 		goName string
 		schema *highbase.Schema
 	}
-	pending := make(map[string]pendingSchema)
-	var order []string
+	var pending []pendingSchema
 	for name, schemaProxy := range a.model.Components.Schemas.FromOldest() {
-		if _, exists := a.typesBySchema[name]; exists {
-			continue
-		}
 		schema, err := schemaProxy.BuildSchema()
 		if err != nil {
 			return fmt.Errorf("building schema %q: %w", name, err)
@@ -105,18 +102,16 @@ func (a *Analyzer) analyzeComponentSchemas(pkg *ir.Package) error {
 		if schema == nil {
 			continue
 		}
-		pending[name] = pendingSchema{a.namer.RegisterName(naming.ToGoName(name)), schema}
-		order = append(order, name)
+		pending = append(pending, pendingSchema{name, a.namer.RegisterName(naming.ToGoName(name)), schema})
 	}
 
-	for _, name := range order {
-		p := pending[name]
-		td, err := a.convertSchema(p.goName, name, p.schema)
+	for _, p := range pending {
+		td, err := a.convertSchema(p.goName, p.name, p.schema)
 		if err != nil {
-			return fmt.Errorf("converting schema %q: %w", name, err)
+			return fmt.Errorf("converting schema %q: %w", p.name, err)
 		}
 		if td != nil {
-			a.typesBySchema[name] = td
+			a.typesBySchema[p.name] = td
 		}
 	}
 
