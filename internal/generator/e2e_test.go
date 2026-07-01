@@ -1854,7 +1854,7 @@ components:
     Ratio:
       type: number
       format: float
-      enum: [1.5, 1e40, .nan]
+      enum: [1.5, 1e40, .nan, NaN, Inf]
     Token:
       type: string
       format: byte
@@ -1903,6 +1903,87 @@ components:
 	if !strings.Contains(types, `Special = ""`) || !strings.Contains(types, `Special = "null"`) {
 		t.Errorf("literal empty/\"null\" string enum members should be kept:\n%s", types)
 	}
+}
+
+// TestE2E_IntegerEnumLeadingZeros guards that a leading-zero decimal integer
+// enum member stays decimal (not parsed as octal) and that members with an 8/9
+// digit are not dropped, while hex/octal literals still parse.
+func TestE2E_IntegerEnumLeadingZeros(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: LeadingZero
+  version: 1.0.0
+paths:
+  /m:
+    get:
+      operationId: getM
+      parameters:
+        - {name: c, in: query, required: true, schema: {$ref: '#/components/schemas/Codes'}}
+      responses:
+        '200':
+          description: ok
+components:
+  schemas:
+    Codes:
+      type: integer
+      enum: [010, 08, 09, 0x1F]
+`
+	files, _ := generateFromSpec(t, spec, "leadingzero")
+	var types string
+	for _, f := range files {
+		if f.Name == "types.go" {
+			types = string(f.Content)
+		}
+	}
+	buildGenerated(t, files, "leadingzero-e2e-test")
+	// 010 is decimal 10, not octal 8; 08/09 are kept, not dropped; 0x1F is hex 31.
+	for _, want := range []string{"Codes010 Codes = 10", "Codes08 Codes = 8", "Codes09 Codes = 9", "= 31"} {
+		if !strings.Contains(types, want) {
+			t.Errorf("integer enum member %q missing/misparsed:\n%s", want, types)
+		}
+	}
+}
+
+// TestE2E_EnumConstDoesNotCollideWithTypeName guards a generated enum constant
+// (Color member red -> ColorRed) against a schema of the same name (ColorRed);
+// both share the Go package namespace, so the const must be renamed or the
+// package fails to compile.
+func TestE2E_EnumConstDoesNotCollideWithTypeName(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: Collide
+  version: 1.0.0
+paths:
+  /x:
+    post:
+      operationId: postX
+      parameters:
+        - {name: color, in: query, required: true, schema: {$ref: '#/components/schemas/Color'}}
+      requestBody:
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ColorRed'}
+      responses:
+        '200':
+          description: ok
+components:
+  schemas:
+    Color:
+      type: string
+      enum: [red, green]
+    ColorRed:
+      type: object
+      properties:
+        x:
+          type: string
+`
+	files, ops := generateFromSpec(t, spec, "collide")
+	if !strings.Contains(ops, "ColorRed") {
+		t.Errorf("expected the ColorRed body type to be referenced:\n%s", ops)
+	}
+	// The const and the type share the package namespace; one is renamed so the
+	// package compiles rather than declaring the same identifier twice.
+	buildGenerated(t, files, "collide-e2e-test")
 }
 
 // runGeneratedWireTest writes the generated files plus a caller-supplied _test.go

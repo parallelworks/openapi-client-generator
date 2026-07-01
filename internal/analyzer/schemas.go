@@ -78,7 +78,6 @@ func (a *Analyzer) convertEnum(goName string, schema *highbase.Schema, nullable 
 		IsNullable:  nullable,
 	}
 
-	used := make(map[string]bool)
 	for _, enumNode := range schema.Enum {
 		if enumNode == nil || enumNode.Tag == "!!null" {
 			continue
@@ -91,15 +90,10 @@ func (a *Analyzer) convertEnum(goName string, schema *highbase.Schema, nullable 
 		if !ok {
 			continue
 		}
-		// Different raw values can sanitize to the same Go identifier (e.g. "a-b"
-		// and "a b" both become AB); suffix the later ones so the consts don't
-		// collide and fail to compile.
-		base := goName + naming.ToGoName(raw)
-		constName := base
-		for i := 2; used[constName]; i++ {
-			constName = base + strconv.Itoa(i)
-		}
-		used[constName] = true
+		// RegisterName keeps the const unique against package types/other consts —
+		// two values that sanitize to the same identifier ("a-b"/"a b"), or a const
+		// that matches a schema-named type, would otherwise fail to compile.
+		constName := a.namer.RegisterName(goName + naming.ToGoName(raw))
 		td.EnumValues = append(td.EnumValues, &ir.EnumVal{
 			Name:    constName,
 			Literal: literal,
@@ -133,11 +127,21 @@ func enumConstLiteral(goType, raw string) (string, bool) {
 			return strconv.FormatBool(b), true
 		}
 	case "int", "int8", "int16", "int32", "int64":
-		if n, err := strconv.ParseInt(raw, 0, intBits(goType)); err == nil {
+		// Base 10 first so a leading-zero decimal (010) stays decimal, then base 0
+		// as a fallback for hex/octal/binary/underscored literals (0x1F, 0o17).
+		n, err := strconv.ParseInt(raw, 10, intBits(goType))
+		if err != nil {
+			n, err = strconv.ParseInt(raw, 0, intBits(goType))
+		}
+		if err == nil {
 			return strconv.FormatInt(n, 10), true
 		}
 	case "uint", "uint8", "uint16", "uint32", "uint64":
-		if n, err := strconv.ParseUint(raw, 0, intBits(goType)); err == nil {
+		n, err := strconv.ParseUint(raw, 10, intBits(goType))
+		if err != nil {
+			n, err = strconv.ParseUint(raw, 0, intBits(goType))
+		}
+		if err == nil {
 			return strconv.FormatUint(n, 10), true
 		}
 	case "float32", "float64":
@@ -152,7 +156,6 @@ func enumConstLiteral(goType, raw string) (string, bool) {
 	return "", false
 }
 
-// intBits returns the bit size of a Go integer type for range-checked parsing.
 func intBits(goType string) int {
 	switch goType {
 	case "int8", "uint8":
