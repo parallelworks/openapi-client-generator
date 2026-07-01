@@ -21,10 +21,11 @@ import (
 {{ end }}type {{ .Name }} = {{ .GoType }}
 {{ else if eq .Kind 2 }}{{ $typeName := .Name }}{{ if $typeDoc }}{{ $typeDoc }}
 {{ end }}type {{ .Name }} {{ .EnumGoType }}
-
+{{ if .EnumValues }}
 const (
-{{ range .EnumValues }}	{{ .Name }} {{ $typeName }} = {{ enumLiteral . }}
+{{ range .EnumValues }}	{{ .Name }} {{ $typeName }} = {{ .Literal }}
 {{ end }})
+{{ end }}
 {{ else if eq .Kind 3 }}{{ $typeName := .Name }}{{ if $typeDoc }}{{ $typeDoc }}
 {{ else }}// {{ .Name }} represents a union type (oneOf/anyOf).{{ end }}
 // Variants: {{ range $i, $v := .UnionTypes }}{{ if $i }}, {{ end }}{{ $v.TypeName }}{{ end }}

@@ -1,7 +1,6 @@
 package generator
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 	"text/template"
@@ -20,7 +19,6 @@ func FuncMap() template.FuncMap {
 		"paramDocComment":         paramDocComment,
 		"indent":                  indent,
 		"jsonTag":                 jsonTag,
-		"enumLiteral":             enumLiteral,
 		"hasOperations":           hasOperations,
 		"successType":             successType,
 		"hasBody":                 hasBody,
@@ -308,25 +306,4 @@ func successContentType(op *ir.OperationDef) string {
 		return "application/json"
 	}
 	return op.SuccessResponse.ContentType
-}
-
-// enumLiteral returns the Go literal representation of an enum value.
-func enumLiteral(v *ir.EnumVal) string {
-	switch val := v.Value.(type) {
-	case string:
-		return fmt.Sprintf("%q", val)
-	case float64:
-		if val == float64(int64(val)) {
-			return fmt.Sprintf("%d", int64(val))
-		}
-		return fmt.Sprintf("%g", val)
-	case int:
-		return fmt.Sprintf("%d", val)
-	case int64:
-		return fmt.Sprintf("%d", val)
-	case bool:
-		return fmt.Sprintf("%t", val)
-	default:
-		return fmt.Sprintf("%v", val)
-	}
 }

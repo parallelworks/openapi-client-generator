@@ -449,13 +449,13 @@ func TestAnalyzePetstore_FieldDetails(t *testing.T) {
 	if petStatus.EnumGoType != "string" {
 		t.Errorf("PetStatus.EnumGoType = %q, want string", petStatus.EnumGoType)
 	}
-	expectedEnumVals := []string{"available", "pending", "sold"}
+	expectedEnumVals := []string{`"available"`, `"pending"`, `"sold"`}
 	if len(petStatus.EnumValues) != 3 {
 		t.Fatalf("PetStatus expected 3 enum values, got %d", len(petStatus.EnumValues))
 	}
 	for i, ev := range petStatus.EnumValues {
-		if ev.Value != expectedEnumVals[i] {
-			t.Errorf("PetStatus enum value %d = %q, want %q", i, ev.Value, expectedEnumVals[i])
+		if ev.Literal != expectedEnumVals[i] {
+			t.Errorf("PetStatus enum literal %d = %q, want %q", i, ev.Literal, expectedEnumVals[i])
 		}
 	}
 }

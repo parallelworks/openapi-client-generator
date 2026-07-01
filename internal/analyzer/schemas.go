@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -57,6 +58,18 @@ func (a *Analyzer) convertSchema(goName, specName string, schema *highbase.Schem
 func (a *Analyzer) convertEnum(goName string, schema *highbase.Schema, nullable bool) (*ir.TypeDef, error) {
 	underlyingType := goTypeForPrimitive(primaryType(schema), schema.Format)
 
+	// An enum over a type Go can't declare constants of (time.Time, []byte, any)
+	// carries no useful named values, so emit a plain alias with no const block.
+	if !constableType(underlyingType) {
+		return &ir.TypeDef{
+			Name:        goName,
+			Description: schema.Description,
+			Kind:        ir.TypeKindAlias,
+			GoType:      underlyingType,
+			IsNullable:  nullable,
+		}, nil
+	}
+
 	td := &ir.TypeDef{
 		Name:        goName,
 		Description: schema.Description,
@@ -67,50 +80,90 @@ func (a *Analyzer) convertEnum(goName string, schema *highbase.Schema, nullable 
 
 	used := make(map[string]bool)
 	for _, enumNode := range schema.Enum {
-		if enumNode == nil {
+		if enumNode == nil || enumNode.Tag == "!!null" {
 			continue
 		}
-		val := enumNode.Value
-		if val == "" || val == "null" {
+		raw := enumNode.Value
+		// Skip a value that has no valid Go constant literal for this type (an
+		// out-of-range, NaN/Inf, or non-numeric member of a numeric enum); the
+		// generated code must always compile.
+		literal, ok := enumConstLiteral(underlyingType, raw)
+		if !ok {
 			continue
 		}
 		// Different raw values can sanitize to the same Go identifier (e.g. "a-b"
 		// and "a b" both become AB); suffix the later ones so the consts don't
-		// collide and fail to compile. The wire Value keeps the original.
-		base := goName + naming.ToGoName(val)
+		// collide and fail to compile.
+		base := goName + naming.ToGoName(raw)
 		constName := base
 		for i := 2; used[constName]; i++ {
 			constName = base + strconv.Itoa(i)
 		}
 		used[constName] = true
 		td.EnumValues = append(td.EnumValues, &ir.EnumVal{
-			Name:  constName,
-			Value: enumValue(underlyingType, val),
+			Name:    constName,
+			Literal: literal,
 		})
 	}
 
 	return td, nil
 }
 
-// enumValue converts a raw enum scalar (always a YAML string) to the typed value
-// its Go type expects, so a numeric or boolean enum renders as an unquoted literal
-// instead of a string that would not compile against a float/int/bool type.
-func enumValue(goType, raw string) any {
+// constableType reports whether Go can declare a typed constant of goType.
+func constableType(goType string) bool {
 	switch goType {
-	case "float32", "float64":
-		if f, err := strconv.ParseFloat(raw, 64); err == nil {
-			return f
-		}
-	case "int", "int32", "int64":
-		if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
-			return n
-		}
+	case "string", "bool",
+		"int", "int8", "int16", "int32", "int64",
+		"uint", "uint8", "uint16", "uint32", "uint64",
+		"float32", "float64":
+		return true
+	}
+	return false
+}
+
+// enumConstLiteral renders a raw enum scalar (always a YAML string) as a Go
+// constant literal for goType, returning ok=false when the value can't be
+// represented (out of range, NaN/Inf, or unparseable), so the caller skips it.
+func enumConstLiteral(goType, raw string) (string, bool) {
+	switch goType {
+	case "string":
+		return strconv.Quote(raw), true
 	case "bool":
 		if b, err := strconv.ParseBool(raw); err == nil {
-			return b
+			return strconv.FormatBool(b), true
+		}
+	case "int", "int8", "int16", "int32", "int64":
+		if n, err := strconv.ParseInt(raw, 0, intBits(goType)); err == nil {
+			return strconv.FormatInt(n, 10), true
+		}
+	case "uint", "uint8", "uint16", "uint32", "uint64":
+		if n, err := strconv.ParseUint(raw, 0, intBits(goType)); err == nil {
+			return strconv.FormatUint(n, 10), true
+		}
+	case "float32", "float64":
+		bits := 64
+		if goType == "float32" {
+			bits = 32
+		}
+		if f, err := strconv.ParseFloat(raw, bits); err == nil && !math.IsInf(f, 0) && !math.IsNaN(f) {
+			return strconv.FormatFloat(f, 'f', -1, bits), true
 		}
 	}
-	return raw
+	return "", false
+}
+
+// intBits returns the bit size of a Go integer type for range-checked parsing.
+func intBits(goType string) int {
+	switch goType {
+	case "int8", "uint8":
+		return 8
+	case "int16", "uint16":
+		return 16
+	case "int32", "uint32":
+		return 32
+	default:
+		return 64
+	}
 }
 
 // convertAllOf creates a struct TypeDef from an allOf composition.

@@ -1818,6 +1818,93 @@ func TestNullableEnum(t *testing.T) {
 `)
 }
 
+// TestE2E_EnumEdgeCasesCompile guards the many enum shapes that could produce a
+// non-compiling const block: hex/octal integers, out-of-range int32/float32
+// members, NaN/Inf, byte/date-time/typeless enums (which must become plain
+// aliases), and literal empty/"null" string values.
+func TestE2E_EnumEdgeCasesCompile(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: EnumEdges
+  version: 1.0.0
+paths:
+  /m:
+    get:
+      operationId: getM
+      parameters:
+        - {name: a, in: query, required: true, schema: {$ref: '#/components/schemas/HexInt'}}
+        - {name: b, in: query, required: true, schema: {$ref: '#/components/schemas/Int32Codes'}}
+        - {name: c, in: query, required: true, schema: {$ref: '#/components/schemas/Ratio'}}
+        - {name: d, in: query, required: true, schema: {$ref: '#/components/schemas/Token'}}
+        - {name: e, in: query, required: true, schema: {$ref: '#/components/schemas/When'}}
+        - {name: f, in: query, required: true, schema: {$ref: '#/components/schemas/Freeform'}}
+        - {name: g, in: query, required: true, schema: {$ref: '#/components/schemas/Special'}}
+      responses:
+        '200':
+          description: ok
+components:
+  schemas:
+    HexInt:
+      type: integer
+      enum: [0x1F, 0o17, 1000]
+    Int32Codes:
+      type: integer
+      format: int32
+      enum: [1, 5000000000]
+    Ratio:
+      type: number
+      format: float
+      enum: [1.5, 1e40, .nan]
+    Token:
+      type: string
+      format: byte
+      enum: [aGVsbG8=]
+    When:
+      type: string
+      format: date-time
+      enum: ["2020-01-01T00:00:00Z"]
+    Freeform:
+      enum: [x, y]
+    Special:
+      type: string
+      enum: ["", "null", active]
+`
+	files, _ := generateFromSpec(t, spec, "enumedges")
+	var types string
+	for _, f := range files {
+		if f.Name == "types.go" {
+			types = string(f.Content)
+		}
+	}
+	// Compiling is the primary guarantee.
+	buildGenerated(t, files, "enumedges-e2e-test")
+
+	// Hex/octal integer members parse to decimal constants.
+	if !strings.Contains(types, "HexInt = 31") || !strings.Contains(types, "HexInt = 15") {
+		t.Errorf("hex/octal integer enum not parsed to decimal:\n%s", types)
+	}
+	// Out-of-range / non-finite members are dropped, not emitted as bad literals.
+	for _, bad := range []string{"5000000000", "1e+40", "1e40", "NaN", "+Inf"} {
+		if strings.Contains(types, bad) {
+			t.Errorf("unrepresentable enum member %q should have been skipped:\n%s", bad, types)
+		}
+	}
+	// Non-constable underlying types become plain aliases (no const block).
+	if !strings.Contains(types, "type Token = []byte") {
+		t.Errorf("byte enum should be an alias:\n%s", types)
+	}
+	if !strings.Contains(types, "type When = time.Time") {
+		t.Errorf("date-time enum should be an alias:\n%s", types)
+	}
+	if !strings.Contains(types, "type Freeform = any") {
+		t.Errorf("typeless enum should be an alias:\n%s", types)
+	}
+	// A literal empty string and the string "null" are kept (not treated as JSON null).
+	if !strings.Contains(types, `Special = ""`) || !strings.Contains(types, `Special = "null"`) {
+		t.Errorf("literal empty/\"null\" string enum members should be kept:\n%s", types)
+	}
+}
+
 // runGeneratedWireTest writes the generated files plus a caller-supplied _test.go
 // into a temp module and runs `go test`, so a serialization bug fails here.
 func runGeneratedWireTest(t *testing.T, files []GeneratedFile, module, testFile string) {

@@ -44,9 +44,9 @@ func TestGenerate_StructAndEnum(t *testing.T) {
 				Kind:        ir.TypeKindEnum,
 				EnumGoType:  "string",
 				EnumValues: []*ir.EnumVal{
-					{Name: "PetStatusAvailable", Value: "available"},
-					{Name: "PetStatusPending", Value: "pending"},
-					{Name: "PetStatusSold", Value: "sold"},
+					{Name: "PetStatusAvailable", Literal: `"available"`},
+					{Name: "PetStatusPending", Literal: `"pending"`},
+					{Name: "PetStatusSold", Literal: `"sold"`},
 				},
 			},
 		},
@@ -517,25 +517,6 @@ func TestSuccessContentType(t *testing.T) {
 				t.Errorf("successContentType() = %q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestEnumLiteral(t *testing.T) {
-	tests := []struct {
-		val  *ir.EnumVal
-		want string
-	}{
-		{&ir.EnumVal{Name: "X", Value: "hello"}, `"hello"`},
-		{&ir.EnumVal{Name: "X", Value: float64(42)}, "42"},
-		{&ir.EnumVal{Name: "X", Value: float64(3.14)}, "3.14"},
-		{&ir.EnumVal{Name: "X", Value: true}, "true"},
-		{&ir.EnumVal{Name: "X", Value: int64(99)}, "99"},
-	}
-	for _, tt := range tests {
-		got := enumLiteral(tt.val)
-		if got != tt.want {
-			t.Errorf("enumLiteral(%v) = %q, want %q", tt.val.Value, got, tt.want)
-		}
 	}
 }
 
