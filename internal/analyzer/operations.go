@@ -109,13 +109,16 @@ func (a *Analyzer) convertOperation(httpMethod, path string, pathItem *v3high.Pa
 // collide, suffixing by kind; only Go identifiers change, never the wire OrigName.
 func disambiguateParamNames(opDef *ir.OperationDef) {
 	// Reserved: the receiver, args, and method/iterator locals a path param could
-	// shadow, plus the package identifiers the generated body references — a path
-	// param named e.g. `url` would shadow the net/url import (`url.Values{}`).
+	// shadow, the package identifiers the generated body references (e.g. a param
+	// named `url` would shadow the net/url import in `url.Values{}`), and the
+	// helper functions the method body calls (a param named `add_query_param`
+	// becomes `addQueryParam`, shadowing the helper of that name).
 	posUsed := map[string]bool{
 		"c": true, "ctx": true, "path": true, "queryValues": true,
 		"headers": true, "result": true, "err": true,
 		"cursor": true, "p": true, "next": true,
 		"context": true, "fmt": true, "http": true, "url": true,
+		"pathReplace": true, "addQueryParam": true, "setHeader": true, "addCookieHeader": true,
 	}
 	if opDef.RequestBody != nil {
 		posUsed["body"] = true

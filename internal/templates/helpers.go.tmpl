@@ -9,16 +9,18 @@ import (
 	"net/url"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // pathReplace substitutes a {param} placeholder in a URL path, encoding the value
-// with the simple style (comma-separated arrays/objects).
-func pathReplace(path, param string, value any) string {
+// with its RFC 6570 path style (simple/label/matrix) and percent-escaping each
+// component so reserved characters stay within one segment.
+func pathReplace(path, param, style string, explode bool, value any) string {
 	v := ""
 	if rv, ok := derefParam(value); ok {
-		v = encodeSimple(rv, false)
+		v = encodePath(param, style, explode, rv)
 	}
 	return strings.Replace(path, "{"+param+"}", v, 1)
 }
@@ -59,29 +61,52 @@ func isObject(rv reflect.Value) bool {
 }
 
 // formatScalar renders a single value: time.Time as RFC 3339, []byte (OpenAPI
-// format:byte) as base64, everything else with default formatting.
+// format:byte) as base64, floats as plain decimals (never scientific notation),
+// everything else with default formatting.
 func formatScalar(rv reflect.Value) string {
 	switch v := rv.Interface().(type) {
 	case time.Time:
 		return v.Format(time.RFC3339)
 	case []byte:
 		return base64.StdEncoding.EncodeToString(v)
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(v), 'f', -1, 32)
 	}
 	return fmt.Sprintf("%v", rv.Interface())
 }
 
-// sliceValues renders each element of a slice as a scalar.
+// formatValue renders a value that may be a scalar or a flattened collection: a
+// slice becomes a comma list, an object a comma list of its property values,
+// everything else a scalar.
+func formatValue(rv reflect.Value) string {
+	switch {
+	case isSlice(rv):
+		return strings.Join(sliceValues(rv), ",")
+	case isObject(rv):
+		flat := make([]string, 0)
+		for _, p := range objectPairs(rv) {
+			flat = append(flat, p[0], p[1])
+		}
+		return strings.Join(flat, ",")
+	default:
+		return formatScalar(rv)
+	}
+}
+
+// sliceValues renders each element of a slice, flattening nested collections.
 func sliceValues(rv reflect.Value) []string {
 	out := make([]string, rv.Len())
 	for i := range out {
-		out[i] = formatScalar(rv.Index(i))
+		out[i] = formatValue(rv.Index(i))
 	}
 	return out
 }
 
 // objectPairs returns an object's (property, value) pairs in a stable order:
-// struct fields in declaration order keyed by their json tag, map keys sorted. A
-// nil pointer property is skipped.
+// struct fields in declaration order keyed by their json tag (an embedded field's
+// properties are flattened in), map keys sorted. A nil pointer property is skipped.
 func objectPairs(rv reflect.Value) [][2]string {
 	var pairs [][2]string
 	switch rv.Kind() {
@@ -92,6 +117,14 @@ func objectPairs(rv reflect.Value) [][2]string {
 			if f.PkgPath != "" {
 				continue
 			}
+			fv, ok := derefParam(rv.Field(i).Interface())
+			if !ok {
+				continue
+			}
+			if f.Anonymous && isObject(fv) {
+				pairs = append(pairs, objectPairs(fv)...)
+				continue
+			}
 			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
 			if name == "" {
 				name = f.Name
@@ -99,9 +132,7 @@ func objectPairs(rv reflect.Value) [][2]string {
 			if name == "-" {
 				continue
 			}
-			if fv, ok := derefParam(rv.Field(i).Interface()); ok {
-				pairs = append(pairs, [2]string{name, formatScalar(fv)})
-			}
+			pairs = append(pairs, [2]string{name, formatValue(fv)})
 		}
 	case reflect.Map:
 		keys := make([]string, 0, rv.Len())
@@ -114,7 +145,7 @@ func objectPairs(rv reflect.Value) [][2]string {
 		sort.Strings(keys)
 		for _, k := range keys {
 			if fv, ok := derefParam(byKey[k].Interface()); ok {
-				pairs = append(pairs, [2]string{k, formatScalar(fv)})
+				pairs = append(pairs, [2]string{k, formatValue(fv)})
 			}
 		}
 	}
@@ -124,8 +155,8 @@ func objectPairs(rv reflect.Value) [][2]string {
 // addQueryParam encodes one query parameter under its OpenAPI style/explode. A nil
 // optional pointer is skipped; any present value — including a zero value like 0,
 // false, or "" — is sent. Arrays explode into repeated keys (the form default) or
-// join by the style's delimiter; objects explode into their own keys, a
-// deepObject bracket form, or a flattened comma list.
+// join by the style's delimiter; objects explode into their own keys, a deepObject
+// bracket form, or a flattened comma list. An empty array/object emits nothing.
 func addQueryParam(values url.Values, key, style string, explode bool, value any) {
 	rv, ok := derefParam(value)
 	if !ok {
@@ -134,6 +165,9 @@ func addQueryParam(values url.Values, key, style string, explode bool, value any
 	switch {
 	case isObject(rv):
 		pairs := objectPairs(rv)
+		if len(pairs) == 0 {
+			return
+		}
 		switch {
 		case style == "deepObject":
 			for _, p := range pairs {
@@ -152,6 +186,9 @@ func addQueryParam(values url.Values, key, style string, explode bool, value any
 		}
 	case isSlice(rv):
 		elems := sliceValues(rv)
+		if len(elems) == 0 {
+			return
+		}
 		if explode {
 			for _, e := range elems {
 				values.Add(key, e)
@@ -176,9 +213,9 @@ func queryDelim(style string) string {
 	}
 }
 
-// encodeSimple renders a value in the simple style (header and path params): a
-// scalar as-is, an array comma-joined, an object as a flat comma list of
-// property/value, or "prop=value" pairs when exploded.
+// encodeSimple renders a value in the simple style (header params): a scalar
+// as-is, an array comma-joined, an object as a flat comma list of property/value,
+// or "prop=value" pairs when exploded.
 func encodeSimple(rv reflect.Value, explode bool) string {
 	switch {
 	case isObject(rv):
@@ -197,6 +234,71 @@ func encodeSimple(rv reflect.Value, explode bool) string {
 	default:
 		return formatScalar(rv)
 	}
+}
+
+// encodePath renders a path parameter per RFC 6570 (simple/label/matrix),
+// percent-escaping each component so reserved characters stay in one segment.
+func encodePath(name, style string, explode bool, rv reflect.Value) string {
+	var items [][2]string // (key, value); key empty for scalars and array elements
+	switch {
+	case isObject(rv):
+		for _, p := range objectPairs(rv) {
+			items = append(items, [2]string{url.PathEscape(p[0]), url.PathEscape(p[1])})
+		}
+	case isSlice(rv):
+		for _, v := range sliceValues(rv) {
+			items = append(items, [2]string{"", url.PathEscape(v)})
+		}
+	default:
+		items = append(items, [2]string{"", url.PathEscape(formatScalar(rv))})
+	}
+
+	switch style {
+	case "label":
+		return "." + strings.Join(pathTokens(items, explode), pathSep(explode, "."))
+	case "matrix":
+		if explode {
+			var b strings.Builder
+			for _, t := range items {
+				b.WriteString(";")
+				if t[0] != "" {
+					b.WriteString(t[0] + "=" + t[1])
+				} else {
+					b.WriteString(name + "=" + t[1])
+				}
+			}
+			return b.String()
+		}
+		return ";" + name + "=" + strings.Join(pathTokens(items, false), ",")
+	default: // simple
+		return strings.Join(pathTokens(items, explode), pathSep(explode, ","))
+	}
+}
+
+// pathTokens flattens (key,value) items: bare values for arrays/scalars, "key=value"
+// when an object is exploded, else "key,value" pairs.
+func pathTokens(items [][2]string, explode bool) []string {
+	var out []string
+	for _, t := range items {
+		switch {
+		case t[0] == "":
+			out = append(out, t[1])
+		case explode:
+			out = append(out, t[0]+"="+t[1])
+		default:
+			out = append(out, t[0], t[1])
+		}
+	}
+	return out
+}
+
+// pathSep is the separator between exploded items for a style (label uses ".",
+// simple ",").
+func pathSep(explode bool, exploded string) string {
+	if explode {
+		return exploded
+	}
+	return ","
 }
 
 // setHeader sets a header parameter (simple style), skipping a nil optional

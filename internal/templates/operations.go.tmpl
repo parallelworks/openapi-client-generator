@@ -26,7 +26,7 @@ type {{ .Name }}Params struct {
 {{ $opDoc := opDocComment . }}{{ if $opDoc }}{{ $opDoc }}
 {{ end }}func (c *Client) {{ .Name }}(ctx context.Context{{ range .PathParams }}, {{ .Name }} {{ .Type }}{{ end }}{{ if hasBody . }}, body {{ if .RequestBody }}{{ if not .RequestBody.Required }}*{{ end }}{{ .RequestBody.TypeName }}{{ else }}any{{ end }}{{ end }}{{ if $hasReqParam }}, params {{ .Name }}Params{{ else if $hasParams }}, opts ...{{ .Name }}Params{{ end }}) {{ if successType . }}(*{{ successType . }}, error){{ else }}error{{ end }} {
 	path := "{{ .Path }}"
-{{ range .PathParams }}	path = pathReplace(path, "{{ .OrigName }}", {{ .Name }})
+{{ range .PathParams }}	path = pathReplace(path, "{{ .OrigName }}", "{{ .Style }}", {{ .Explode }}, {{ .Name }})
 {{ end }}
 {{- if and $hasParams (not $hasReqParam) }}	var params {{ .Name }}Params
 	if len(opts) > 0 {

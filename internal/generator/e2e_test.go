@@ -532,7 +532,7 @@ paths:
 	if !strings.Contains(ops, "paramsPath string") {
 		t.Errorf("path param colliding with params arg not disambiguated:\n%s", ops)
 	}
-	if !strings.Contains(ops, `pathReplace(path, "params", paramsPath)`) {
+	if !strings.Contains(ops, `pathReplace(path, "params", "simple", false, paramsPath)`) {
 		t.Errorf("disambiguated path param must still substitute under its wire name:\n%s", ops)
 	}
 	// The two same-FieldName params must get distinct struct fields, each still
@@ -940,7 +940,7 @@ paths:
 	if !strings.Contains(ops, "urlPath string") {
 		t.Errorf("path param shadowing the net/url import was not disambiguated:\n%s", ops)
 	}
-	if !strings.Contains(ops, `pathReplace(path, "url", urlPath)`) {
+	if !strings.Contains(ops, `pathReplace(path, "url", "simple", false, urlPath)`) {
 		t.Errorf("disambiguated path param must still substitute under its wire name:\n%s", ops)
 	}
 	buildGenerated(t, files, "shadow-e2e-test")
@@ -1046,6 +1046,11 @@ paths:
           required: false
           schema:
             type: boolean
+        - name: price
+          in: query
+          required: true
+          schema:
+            type: number
         - name: X-Tags
           in: header
           required: true
@@ -1085,11 +1090,12 @@ import (
 func ptr[T any](v T) *T { return &v }
 
 func TestParamEncodingOnTheWire(t *testing.T) {
-	var gotSig, gotSince, gotFlag, gotTags string
+	var gotSig, gotSince, gotFlag, gotPrice, gotTags string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotSig = r.URL.Query().Get("sig")
 		gotSince = r.URL.Query().Get("since")
 		gotFlag = r.URL.Query().Get("flag")
+		gotPrice = r.URL.Query().Get("price")
 		gotTags = r.Header.Get("X-Tags")
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -1099,6 +1105,7 @@ func TestParamEncodingOnTheWire(t *testing.T) {
 		Sig:   []byte("hi"),
 		Since: time.Date(2023, 1, 2, 3, 4, 5, 0, time.UTC),
 		Flag:  ptr(false),
+		Price: 1000000,
 		XTags: []string{"a", "b"},
 	}); err != nil {
 		t.Fatalf("GetX: %v", err)
@@ -1111,6 +1118,9 @@ func TestParamEncodingOnTheWire(t *testing.T) {
 	}
 	if gotFlag != "false" {
 		t.Errorf("explicitly-set optional flag = %q, want \"false\" (zero value must be sent)", gotFlag)
+	}
+	if gotPrice != "1000000" {
+		t.Errorf("number query param price = %q, want \"1000000\" (plain decimal, not scientific notation)", gotPrice)
 	}
 	if gotTags != "a,b" {
 		t.Errorf("array header X-Tags = %q, want \"a,b\" (comma-joined)", gotTags)
@@ -1272,11 +1282,16 @@ components:
       required:
         - status
         - kind
+        - tags
       properties:
         status:
           type: string
         kind:
           type: string
+        tags:
+          type: array
+          items:
+            type: string
 `
 	files, ops := generateFromSpec(t, spec, "objstyles")
 	if !strings.Contains(ops, "Filter Filter") {
@@ -1292,21 +1307,26 @@ import (
 )
 
 func TestObjectStyles(t *testing.T) {
-	var fStatus, fKind, meta string
+	var fStatus, fKind, fTags, meta string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fStatus = r.URL.Query().Get("filter[status]")
 		fKind = r.URL.Query().Get("filter[kind]")
+		fTags = r.URL.Query().Get("filter[tags]")
 		meta = r.Header.Get("X-Meta")
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 
-	f := Filter{Status: "open", Kind: "bug"}
+	f := Filter{Status: "open", Kind: "bug", Tags: []string{"a", "b"}}
 	if err := NewClient(srv.URL).GetO(t.Context(), GetOParams{Filter: f, XMeta: f}); err != nil {
 		t.Fatalf("GetO: %v", err)
 	}
 	if fStatus != "open" || fKind != "bug" {
 		t.Errorf("deepObject filter = status:%q kind:%q, want open/bug", fStatus, fKind)
+	}
+	// An array-valued object property is comma-joined, not Go's "[a b]" literal.
+	if fTags != "a,b" {
+		t.Errorf("deepObject array property filter[tags] = %q, want a,b", fTags)
 	}
 	if !strings.Contains(meta, "status=open") || !strings.Contains(meta, "kind=bug") {
 		t.Errorf("simple explode=true header X-Meta = %q, want status=open and kind=bug", meta)
@@ -1433,6 +1453,102 @@ func TestObjectCombos(t *testing.T) {
 	}
 }
 `)
+}
+
+// TestE2E_PathParamStylesOnTheWire covers path serialization: reserved characters
+// are percent-escaped within a segment, and the label (.) and matrix (;name=)
+// styles are honored.
+func TestE2E_PathParamStylesOnTheWire(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: PathStyles
+  version: 1.0.0
+paths:
+  /f/{id}/{lbl}/{mtx}:
+    get:
+      operationId: getF
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: lbl
+          in: path
+          required: true
+          style: label
+          schema:
+            type: string
+        - name: mtx
+          in: path
+          required: true
+          style: matrix
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+`
+	files, _ := generateFromSpec(t, spec, "pathstyles")
+	runGeneratedWireTest(t, files, "pathstyles", `package pathstyles
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestPathStyles(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// id contains a '/', which must be escaped so it stays one path segment.
+	if err := NewClient(srv.URL).GetF(t.Context(), "a/b", "x", "y"); err != nil {
+		t.Fatalf("GetF: %v", err)
+	}
+	if gotPath != "/f/a%2Fb/.x/;mtx=y" {
+		t.Errorf("path = %q, want /f/a%%2Fb/.x/;mtx=y (escaped id, label .x, matrix ;mtx=y)", gotPath)
+	}
+}
+`)
+}
+
+// TestE2E_PathParamShadowsHelper guards a path param whose Go name equals a helper
+// the method body calls (add_query_param -> addQueryParam); it must be renamed or
+// the generated code fails to compile.
+func TestE2E_PathParamShadowsHelper(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: HelperShadow
+  version: 1.0.0
+paths:
+  /x/{add_query_param}:
+    get:
+      operationId: getX
+      parameters:
+        - name: add_query_param
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+`
+	files, ops := generateFromSpec(t, spec, "helpershadow")
+	if strings.Contains(ops, "addQueryParam string") {
+		t.Errorf("path param collided with the addQueryParam helper (would shadow it):\n%s", ops)
+	}
+	buildGenerated(t, files, "helpershadow-e2e-test")
 }
 
 // runGeneratedWireTest writes the generated files plus a caller-supplied _test.go
