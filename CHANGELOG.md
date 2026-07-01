@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.9...v0.1.10) (2026-07-01)
+
+
+### Bug Fixes
+
+* stop duplicating the status code in generated API error strings ([#27](https://github.com/parallelworks/openapi-client-generator/issues/27)) ([f534618](https://github.com/parallelworks/openapi-client-generator/commit/f5346182d6ef271bc068d2b9bdf4e45cc2fcf2b2))
+
 ## [0.1.9](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.8...v0.1.9) (2026-06-24)
 
 
