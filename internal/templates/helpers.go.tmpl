@@ -60,27 +60,38 @@ func isObject(rv reflect.Value) bool {
 	return false
 }
 
-// formatScalar renders a single value: time.Time as RFC 3339, []byte (OpenAPI
-// format:byte) as base64, floats as plain decimals (never scientific notation),
-// everything else with default formatting.
+// formatScalar renders a single value: time.Time as RFC 3339, a byte slice
+// (OpenAPI format:byte) as base64, floats as plain decimals (never scientific
+// notation), everything else with default formatting. Kind is checked rather than
+// the concrete type so a defined type (e.g. `type Weight float64` from a number
+// enum) is still formatted correctly.
 func formatScalar(rv reflect.Value) string {
-	switch v := rv.Interface().(type) {
-	case time.Time:
-		return v.Format(time.RFC3339)
-	case []byte:
-		return base64.StdEncoding.EncodeToString(v)
-	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64)
-	case float32:
-		return strconv.FormatFloat(float64(v), 'f', -1, 32)
+	if t, ok := rv.Interface().(time.Time); ok {
+		return t.Format(time.RFC3339)
+	}
+	switch rv.Kind() {
+	case reflect.Slice:
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			return base64.StdEncoding.EncodeToString(rv.Bytes())
+		}
+	case reflect.Float32:
+		return strconv.FormatFloat(rv.Float(), 'f', -1, 32)
+	case reflect.Float64:
+		return strconv.FormatFloat(rv.Float(), 'f', -1, 64)
 	}
 	return fmt.Sprintf("%v", rv.Interface())
 }
 
 // formatValue renders a value that may be a scalar or a flattened collection: a
 // slice becomes a comma list, an object a comma list of its property values,
-// everything else a scalar.
+// everything else a scalar. An interface element (from a []any) is unwrapped first.
 func formatValue(rv reflect.Value) string {
+	if rv.Kind() == reflect.Interface {
+		if rv.IsNil() {
+			return ""
+		}
+		rv = rv.Elem()
+	}
 	switch {
 	case isSlice(rv):
 		return strings.Join(sliceValues(rv), ",")
@@ -153,10 +164,8 @@ func objectPairs(rv reflect.Value) [][2]string {
 }
 
 // addQueryParam encodes one query parameter under its OpenAPI style/explode. A nil
-// optional pointer is skipped; any present value — including a zero value like 0,
-// false, or "" — is sent. Arrays explode into repeated keys (the form default) or
-// join by the style's delimiter; objects explode into their own keys, a deepObject
-// bracket form, or a flattened comma list. An empty array/object emits nothing.
+// optional pointer is skipped, but a present zero value (0/false/"") is sent — the
+// pointer already signals "unset".
 func addQueryParam(values url.Values, key, style string, explode bool, value any) {
 	rv, ok := derefParam(value)
 	if !ok {
@@ -244,6 +253,12 @@ func encodeSimple(rv reflect.Value, explode bool) string {
 	}
 }
 
+// pathEscape percent-encodes a path component, additionally escaping '=' so a
+// value can't be mistaken for a matrix/label key=value separator.
+func pathEscape(s string) string {
+	return strings.ReplaceAll(url.PathEscape(s), "=", "%3D")
+}
+
 // encodePath renders a path parameter per RFC 6570 (simple/label/matrix),
 // percent-escaping each component so reserved characters stay in one segment.
 func encodePath(name, style string, explode bool, rv reflect.Value) string {
@@ -251,14 +266,18 @@ func encodePath(name, style string, explode bool, rv reflect.Value) string {
 	switch {
 	case isObject(rv):
 		for _, p := range objectPairs(rv) {
-			items = append(items, [2]string{url.PathEscape(p[0]), url.PathEscape(p[1])})
+			items = append(items, [2]string{pathEscape(p[0]), pathEscape(p[1])})
 		}
 	case isSlice(rv):
 		for _, v := range sliceValues(rv) {
-			items = append(items, [2]string{"", url.PathEscape(v)})
+			items = append(items, [2]string{"", pathEscape(v)})
 		}
 	default:
-		items = append(items, [2]string{"", url.PathEscape(formatScalar(rv))})
+		items = append(items, [2]string{"", pathEscape(formatScalar(rv))})
+	}
+	// An empty list/object expands to nothing (RFC 6570 §2.3), so no prefix.
+	if len(items) == 0 {
+		return ""
 	}
 
 	switch style {

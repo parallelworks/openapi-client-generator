@@ -118,7 +118,8 @@ func disambiguateParamNames(opDef *ir.OperationDef) {
 		"headers": true, "result": true, "err": true,
 		"cursor": true, "p": true, "next": true,
 		"context": true, "fmt": true, "http": true, "url": true,
-		"pathReplace": true, "addQueryParam": true, "setHeader": true, "addCookieHeader": true,
+		"pathReplace": true, "addQueryParam": true, "encodeQuery": true,
+		"setHeader": true, "addCookieHeader": true,
 	}
 	if opDef.RequestBody != nil {
 		posUsed["body"] = true

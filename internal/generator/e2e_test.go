@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -447,6 +448,18 @@ func TestAddQueryParam_NonPointerInt(t *testing.T) {
 	addQueryParam(values, "count", "form", true, int32(7))
 	if got := values.Get("count"); got != "7" {
 		t.Errorf("expected %q, got %q", "7", got)
+	}
+}
+
+// A defined type over float64 (e.g. a number enum) must still format as a plain
+// decimal — Kind, not the concrete type, drives float formatting.
+type definedFloat float64
+
+func TestAddQueryParam_DefinedFloatType(t *testing.T) {
+	values := url.Values{}
+	addQueryParam(values, "w", "form", true, definedFloat(1000000))
+	if got := values.Get("w"); got != "1000000" {
+		t.Errorf("defined float type = %q, want %q (plain decimal, not scientific)", got, "1000000")
 	}
 }
 `)
@@ -1524,19 +1537,28 @@ func TestPathStyles(t *testing.T) {
 }
 
 // TestE2E_PathParamShadowsHelper guards a path param whose Go name equals a helper
-// the method body calls (add_query_param -> addQueryParam); it must be renamed or
-// the generated code fails to compile.
+// the method body calls (e.g. add_query_param -> addQueryParam, encode_query ->
+// encodeQuery); it must be renamed or the generated code fails to compile.
 func TestE2E_PathParamShadowsHelper(t *testing.T) {
-	spec := `openapi: 3.0.0
+	// Each param name maps to a helper the generated body invokes (a query param is
+	// present so addQueryParam/encodeQuery are emitted).
+	cases := []struct{ param, goName string }{
+		{"add_query_param", "addQueryParam"},
+		{"encode_query", "encodeQuery"},
+		{"path_replace", "pathReplace"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.param, func(t *testing.T) {
+			spec := fmt.Sprintf(`openapi: 3.0.0
 info:
   title: HelperShadow
   version: 1.0.0
 paths:
-  /x/{add_query_param}:
+  /x/{%s}:
     get:
       operationId: getX
       parameters:
-        - name: add_query_param
+        - name: %s
           in: path
           required: true
           schema:
@@ -1549,12 +1571,14 @@ paths:
       responses:
         '200':
           description: ok
-`
-	files, ops := generateFromSpec(t, spec, "helpershadow")
-	if strings.Contains(ops, "addQueryParam string") {
-		t.Errorf("path param collided with the addQueryParam helper (would shadow it):\n%s", ops)
+`, tc.param, tc.param)
+			files, ops := generateFromSpec(t, spec, "helpershadow")
+			if strings.Contains(ops, tc.goName+" string") {
+				t.Errorf("path param collided with the %s helper (would shadow it):\n%s", tc.goName, ops)
+			}
+			buildGenerated(t, files, "helpershadow-e2e-test")
+		})
 	}
-	buildGenerated(t, files, "helpershadow-e2e-test")
 }
 
 // runGeneratedWireTest writes the generated files plus a caller-supplied _test.go
