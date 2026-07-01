@@ -43,11 +43,11 @@ type {{ .Name }}Params struct {
 {{- $errType := errorType . -}}
 {{ if successType . }}	var result {{ successType . }}
 	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, &result, "{{ successContentType . }}"{{ if hasOptionalHeaderParams . }}, headers{{ end }}); err != nil {
-		return nil, {{ if $errType }}parse{{ $errType }}Error(err){{ else }}err{{ end }}
+		return nil, {{ if $errType }}parse{{ $errType }}Response(err){{ else }}err{{ end }}
 	}
 	return &result, nil
 {{ else }}	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, nil, "{{ successContentType . }}"{{ if hasOptionalHeaderParams . }}, headers{{ end }}); err != nil {
-		return {{ if $errType }}parse{{ $errType }}Error(err){{ else }}err{{ end }}
+		return {{ if $errType }}parse{{ $errType }}Response(err){{ else }}err{{ end }}
 	}
 	return nil
 {{ end }}}
