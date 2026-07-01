@@ -34,13 +34,13 @@ type {{ .Name }}Params struct {
 	}
 {{ end }}
 {{- if .QueryParams }}	queryValues := url.Values{}
-{{ range .QueryParams }}	addQueryParam(queryValues, "{{ .OrigName }}", params.{{ .FieldName }})
+{{ range .QueryParams }}	addQueryParam(queryValues, "{{ .OrigName }}", "{{ .Style }}", {{ .Explode }}, params.{{ .FieldName }})
 {{ end }}	if len(queryValues) > 0 {
 		path += "?" + queryValues.Encode()
 	}
 {{ end }}
 {{- if $needHeaders }}	headers := make(http.Header)
-{{ range .HeaderParams }}	setHeader(headers, "{{ .OrigName }}", params.{{ .FieldName }})
+{{ range .HeaderParams }}	setHeader(headers, "{{ .OrigName }}", {{ .Explode }}, params.{{ .FieldName }})
 {{ end }}{{ range .CookieParams }}	addCookieHeader(headers, "{{ .OrigName }}", params.{{ .FieldName }})
 {{ end }}{{ end }}
 {{- $errType := errorType . -}}

@@ -394,7 +394,7 @@ func ptr[T any](v T) *T { return &v }
 
 func TestAddQueryParam_PointerString(t *testing.T) {
 	values := url.Values{}
-	addQueryParam(values, "name", ptr("hello"))
+	addQueryParam(values, "name", "form", true, ptr("hello"))
 	if got := values.Get("name"); got != "hello" {
 		t.Errorf("expected %q, got %q", "hello", got)
 	}
@@ -402,7 +402,7 @@ func TestAddQueryParam_PointerString(t *testing.T) {
 
 func TestAddQueryParam_PointerInt(t *testing.T) {
 	values := url.Values{}
-	addQueryParam(values, "limit", ptr(int32(42)))
+	addQueryParam(values, "limit", "form", true, ptr(int32(42)))
 	if got := values.Get("limit"); got != "42" {
 		t.Errorf("expected %q, got %q", "42", got)
 	}
@@ -411,7 +411,7 @@ func TestAddQueryParam_PointerInt(t *testing.T) {
 func TestAddQueryParam_NilStringPointer(t *testing.T) {
 	values := url.Values{}
 	var s *string
-	addQueryParam(values, "name", s)
+	addQueryParam(values, "name", "form", true, s)
 	if values.Has("name") {
 		t.Errorf("expected no param, got %q", values.Get("name"))
 	}
@@ -420,7 +420,7 @@ func TestAddQueryParam_NilStringPointer(t *testing.T) {
 func TestAddQueryParam_NilIntPointer(t *testing.T) {
 	values := url.Values{}
 	var n *int32
-	addQueryParam(values, "limit", n)
+	addQueryParam(values, "limit", "form", true, n)
 	if values.Has("limit") {
 		t.Errorf("expected no param, got %q", values.Get("limit"))
 	}
@@ -428,7 +428,7 @@ func TestAddQueryParam_NilIntPointer(t *testing.T) {
 
 func TestAddQueryParam_UntypedNil(t *testing.T) {
 	values := url.Values{}
-	addQueryParam(values, "key", nil)
+	addQueryParam(values, "key", "form", true, nil)
 	if values.Has("key") {
 		t.Errorf("expected no param, got %q", values.Get("key"))
 	}
@@ -436,7 +436,7 @@ func TestAddQueryParam_UntypedNil(t *testing.T) {
 
 func TestAddQueryParam_NonPointerString(t *testing.T) {
 	values := url.Values{}
-	addQueryParam(values, "name", "world")
+	addQueryParam(values, "name", "form", true, "world")
 	if got := values.Get("name"); got != "world" {
 		t.Errorf("expected %q, got %q", "world", got)
 	}
@@ -444,7 +444,7 @@ func TestAddQueryParam_NonPointerString(t *testing.T) {
 
 func TestAddQueryParam_NonPointerInt(t *testing.T) {
 	values := url.Values{}
-	addQueryParam(values, "count", int32(7))
+	addQueryParam(values, "count", "form", true, int32(7))
 	if got := values.Get("count"); got != "7" {
 		t.Errorf("expected %q, got %q", "7", got)
 	}
@@ -537,10 +537,10 @@ paths:
 	}
 	// The two same-FieldName params must get distinct struct fields, each still
 	// encoded under its own wire name.
-	if !strings.Contains(ops, `addQueryParam(queryValues, "user-id", params.UserID)`) {
+	if !strings.Contains(ops, `addQueryParam(queryValues, "user-id", "form", true, params.UserID)`) {
 		t.Errorf("query field not at UserID:\n%s", ops)
 	}
-	if !strings.Contains(ops, `setHeader(headers, "user_id", params.UserIDHeader)`) {
+	if !strings.Contains(ops, `setHeader(headers, "user_id", false, params.UserIDHeader)`) {
 		t.Errorf("colliding header field not disambiguated to UserIDHeader:\n%s", ops)
 	}
 
@@ -732,7 +732,7 @@ paths:
 		}
 	}
 	// Required header set unconditionally; required cookie always added.
-	if !strings.Contains(ops, `setHeader(headers, "version", params.Version)`) {
+	if !strings.Contains(ops, `setHeader(headers, "version", false, params.Version)`) {
 		t.Errorf("required header not set unconditionally:\n%s", ops)
 	}
 	if !strings.Contains(ops, `addCookieHeader(headers, "session", params.Session)`) {
@@ -850,7 +850,7 @@ components:
 	if !strings.Contains(ops, "body Thing, params CreateThingParams)") {
 		t.Errorf("body + required param signature wrong (want ctx, body, params):\n%s", ops)
 	}
-	if !strings.Contains(ops, `setHeader(headers, "idempotency-key", params.IdempotencyKey)`) {
+	if !strings.Contains(ops, `setHeader(headers, "idempotency-key", false, params.IdempotencyKey)`) {
 		t.Errorf("required header not set from the params struct:\n%s", ops)
 	}
 	buildGenerated(t, files, "body-e2e-test")
@@ -1127,6 +1127,216 @@ func TestParamEncodingOnTheWire(t *testing.T) {
 			t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
 		}
 		t.Fatalf("param-encoding round-trip failed: %v\n%s", err, string(output))
+	}
+}
+
+// TestE2E_QueryArrayStylesOnTheWire covers the OpenAPI array serialization styles:
+// form/explode=false (comma), spaceDelimited, pipeDelimited, and form/explode=true
+// (repeated keys), each asserted against a real request.
+func TestE2E_QueryArrayStylesOnTheWire(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: ArrStyles
+  version: 1.0.0
+paths:
+  /a:
+    get:
+      operationId: getA
+      parameters:
+        - name: csv
+          in: query
+          required: true
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: spaced
+          in: query
+          required: true
+          style: spaceDelimited
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: piped
+          in: query
+          required: true
+          style: pipeDelimited
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: repeated
+          in: query
+          required: true
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+        - name: plain
+          in: query
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        '200':
+          description: ok
+`
+	files, _ := generateFromSpec(t, spec, "arrstyles")
+	runGeneratedWireTest(t, files, "arrstyles", `package arrstyles
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestArrayStyles(t *testing.T) {
+	var csv, spaced, piped string
+	var repeated, plain []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		csv = r.URL.Query().Get("csv")
+		spaced = r.URL.Query().Get("spaced")
+		piped = r.URL.Query().Get("piped")
+		repeated = r.URL.Query()["repeated"]
+		plain = r.URL.Query()["plain"]
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	list := []string{"a", "b", "c"}
+	if err := NewClient(srv.URL).GetA(t.Context(), GetAParams{
+		Csv: list, Spaced: list, Piped: list, Repeated: list, Plain: list,
+	}); err != nil {
+		t.Fatalf("GetA: %v", err)
+	}
+	if csv != "a,b,c" {
+		t.Errorf("form explode=false csv = %q, want a,b,c", csv)
+	}
+	if spaced != "a b c" {
+		t.Errorf("spaceDelimited spaced = %q, want \"a b c\"", spaced)
+	}
+	if piped != "a|b|c" {
+		t.Errorf("pipeDelimited piped = %q, want a|b|c", piped)
+	}
+	if len(repeated) != 3 || repeated[0] != "a" || repeated[2] != "c" {
+		t.Errorf("form explode=true repeated = %#v, want [a b c]", repeated)
+	}
+	// No style/explode specified: query defaults to form+explode=true (repeated keys).
+	if len(plain) != 3 || plain[0] != "a" || plain[2] != "c" {
+		t.Errorf("default (unspecified) array plain = %#v, want repeated keys [a b c]", plain)
+	}
+}
+`)
+}
+
+// TestE2E_ObjectParamStylesOnTheWire covers object serialization: deepObject
+// (bracketed query keys) and simple/explode=true (property=value in a header).
+func TestE2E_ObjectParamStylesOnTheWire(t *testing.T) {
+	spec := `openapi: 3.0.0
+info:
+  title: ObjStyles
+  version: 1.0.0
+paths:
+  /o:
+    get:
+      operationId: getO
+      parameters:
+        - name: filter
+          in: query
+          required: true
+          style: deepObject
+          explode: true
+          schema:
+            $ref: '#/components/schemas/Filter'
+        - name: X-Meta
+          in: header
+          required: true
+          style: simple
+          explode: true
+          schema:
+            $ref: '#/components/schemas/Filter'
+      responses:
+        '200':
+          description: ok
+components:
+  schemas:
+    Filter:
+      type: object
+      required:
+        - status
+        - kind
+      properties:
+        status:
+          type: string
+        kind:
+          type: string
+`
+	files, ops := generateFromSpec(t, spec, "objstyles")
+	if !strings.Contains(ops, "Filter Filter") {
+		t.Errorf("object query param should be a struct-typed field:\n%s", ops)
+	}
+	runGeneratedWireTest(t, files, "objstyles", `package objstyles
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestObjectStyles(t *testing.T) {
+	var fStatus, fKind, meta string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fStatus = r.URL.Query().Get("filter[status]")
+		fKind = r.URL.Query().Get("filter[kind]")
+		meta = r.Header.Get("X-Meta")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	f := Filter{Status: "open", Kind: "bug"}
+	if err := NewClient(srv.URL).GetO(t.Context(), GetOParams{Filter: f, XMeta: f}); err != nil {
+		t.Fatalf("GetO: %v", err)
+	}
+	if fStatus != "open" || fKind != "bug" {
+		t.Errorf("deepObject filter = status:%q kind:%q, want open/bug", fStatus, fKind)
+	}
+	if !strings.Contains(meta, "status=open") || !strings.Contains(meta, "kind=bug") {
+		t.Errorf("simple explode=true header X-Meta = %q, want status=open and kind=bug", meta)
+	}
+}
+`)
+}
+
+// runGeneratedWireTest writes the generated files plus a caller-supplied _test.go
+// into a temp module and runs `go test`, so a serialization bug fails here.
+func runGeneratedWireTest(t *testing.T, files []GeneratedFile, module, testFile string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	goMod := []byte("module " + module + "-e2e-test\n\ngo 1.25.5\n")
+	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), goMod, 0o644); err != nil {
+		t.Fatalf("writing go.mod: %v", err)
+	}
+	if err := WriteFiles(tmpDir, files); err != nil {
+		t.Fatalf("WriteFiles: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "wire_test.go"), []byte(testFile), 0o644); err != nil {
+		t.Fatalf("writing wire_test.go: %v", err)
+	}
+	cmd := exec.Command("go", "test", "./...")
+	cmd.Dir = tmpDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		for _, f := range files {
+			t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
+		}
+		t.Fatalf("generated wire test failed: %v\n%s", err, string(output))
 	}
 }
 

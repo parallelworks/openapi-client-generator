@@ -216,7 +216,7 @@ func (a *Analyzer) convertParam(param *v3high.Parameter) (*ir.ParamDef, error) {
 	}
 
 	required := param.Required != nil && *param.Required
-	explode := param.Explode != nil && *param.Explode
+	style, explode := effectiveStyleExplode(param)
 
 	return &ir.ParamDef{
 		Name:        naming.ToGoParamName(param.Name),
@@ -227,9 +227,30 @@ func (a *Analyzer) convertParam(param *v3high.Parameter) (*ir.ParamDef, error) {
 		Required:    required,
 		Description: param.Description,
 		Deprecated:  param.Deprecated,
-		Style:       param.Style,
+		Style:       style,
 		Explode:     explode,
 	}, nil
+}
+
+// effectiveStyleExplode resolves the OpenAPI serialization defaults: style is
+// form for query/cookie and simple for path/header when unset; explode defaults
+// to true only for form. The raw param.Explode is false when omitted, which would
+// wrongly collapse an ordinary form array — so the default must be applied here.
+func effectiveStyleExplode(param *v3high.Parameter) (string, bool) {
+	style := param.Style
+	if style == "" {
+		switch param.In {
+		case "query", "cookie":
+			style = "form"
+		default:
+			style = "simple"
+		}
+	}
+	explode := style == "form"
+	if param.Explode != nil {
+		explode = *param.Explode
+	}
+	return style, explode
 }
 
 // convertRequestBody converts an OpenAPI request body to an ir.RequestBodyDef.

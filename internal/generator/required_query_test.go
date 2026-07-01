@@ -58,9 +58,9 @@ func TestGenerate_RequiredQueryParam_Compiles(t *testing.T) {
 					{Name: "id", FieldName: "ID", OrigName: "id", Location: "path", Type: "string", Required: true},
 				},
 				QueryParams: []*ir.ParamDef{
-					{Name: "startDate", FieldName: "StartDate", OrigName: "startDate", Location: "query", Type: "string", Required: true},
-					{Name: "tags", FieldName: "Tags", OrigName: "tags", Location: "query", Type: "[]string", Required: true},
-					{Name: "endDate", FieldName: "EndDate", OrigName: "endDate", Location: "query", Type: "string", Required: false},
+					{Name: "startDate", FieldName: "StartDate", OrigName: "startDate", Location: "query", Type: "string", Required: true, Style: "form", Explode: true},
+					{Name: "tags", FieldName: "Tags", OrigName: "tags", Location: "query", Type: "[]string", Required: true, Style: "form", Explode: true},
+					{Name: "endDate", FieldName: "EndDate", OrigName: "endDate", Location: "query", Type: "string", Required: false, Style: "form", Explode: true},
 				},
 			},
 		},
@@ -97,21 +97,21 @@ func TestGenerate_RequiredQueryParam_Compiles(t *testing.T) {
 	// any present value (a nil optional pointer is the only thing it skips), so a
 	// required param — and an explicitly-set optional zero value — always reaches
 	// the server.
-	if !strings.Contains(ops, `addQueryParam(queryValues, "startDate", params.StartDate)`) {
+	if !strings.Contains(ops, `addQueryParam(queryValues, "startDate", "form", true, params.StartDate)`) {
 		t.Errorf("required query param not encoded into the query string:\n%s", ops)
 	}
 	// A required slice param is a value []T field, encoded as repeated keys.
 	if !strings.Contains(ops, "Tags []string `json:\"tags\"`") {
 		t.Errorf("required slice query param not a value field in the params struct:\n%s", ops)
 	}
-	if !strings.Contains(ops, `addQueryParam(queryValues, "tags", params.Tags)`) {
+	if !strings.Contains(ops, `addQueryParam(queryValues, "tags", "form", true, params.Tags)`) {
 		t.Errorf("required slice query param not encoded into the query string:\n%s", ops)
 	}
 	// The optional param is a pointer field, also encoded via addQueryParam.
 	if !strings.Contains(ops, "EndDate *string") {
 		t.Errorf("optional query param missing from params struct:\n%s", ops)
 	}
-	if !strings.Contains(ops, `addQueryParam(queryValues, "endDate", params.EndDate)`) {
+	if !strings.Contains(ops, `addQueryParam(queryValues, "endDate", "form", true, params.EndDate)`) {
 		t.Errorf("optional query param not encoded from params:\n%s", ops)
 	}
 
@@ -141,7 +141,7 @@ func ptr[T any](v T) *T { return &v }
 func TestAddQueryParamKeepsRequiredZeroValues(t *testing.T) {
 	for _, v := range []any{0, false, ""} {
 		vals := url.Values{}
-		addQueryParam(vals, "k", v)
+		addQueryParam(vals, "k", "form", true, v)
 		if _, ok := vals["k"]; !ok {
 			t.Errorf("addQueryParam dropped required zero value %#v; required params must always be encoded", v)
 		}
@@ -153,14 +153,14 @@ func TestAddQueryParamKeepsRequiredZeroValues(t *testing.T) {
 func TestAddQueryParamSendsExplicitOptionalZeroValues(t *testing.T) {
 	for _, v := range []any{ptr(0), ptr(false), ptr("")} {
 		vals := url.Values{}
-		addQueryParam(vals, "k", v)
+		addQueryParam(vals, "k", "form", true, v)
 		if _, ok := vals["k"]; !ok {
 			t.Errorf("addQueryParam dropped explicitly-set optional zero value %#v", v)
 		}
 	}
 	var nilPtr *int
 	vals := url.Values{}
-	addQueryParam(vals, "k", nilPtr)
+	addQueryParam(vals, "k", "form", true, nilPtr)
 	if _, ok := vals["k"]; ok {
 		t.Error("addQueryParam encoded an unset (nil) optional param")
 	}
@@ -168,12 +168,12 @@ func TestAddQueryParamSendsExplicitOptionalZeroValues(t *testing.T) {
 
 func TestQueryParamsEncodeSlicesAsRepeatedKeys(t *testing.T) {
 	vals := url.Values{}
-	addQueryParam(vals, "ids", []string{"a", "b", "c"})
+	addQueryParam(vals, "ids", "form", true, []string{"a", "b", "c"})
 	if got := vals["ids"]; len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {
 		t.Errorf("addQueryParam([]string) = %#v; want repeated keys [a b c]", got)
 	}
 	vals = url.Values{}
-	addQueryParam(vals, "nums", []int{1, 2, 3})
+	addQueryParam(vals, "nums", "form", true, []int{1, 2, 3})
 	if got := vals["nums"]; len(got) != 3 || got[0] != "1" || got[2] != "3" {
 		t.Errorf("addQueryParam([]int) = %#v; want repeated keys [1 2 3]", got)
 	}
