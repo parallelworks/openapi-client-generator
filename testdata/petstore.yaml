@@ -192,5 +192,6 @@ components:
       in: header
       name: X-API-Key
 security:
+  - {}
   - bearerAuth: []
   - apiKeyAuth: []
