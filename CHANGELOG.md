@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.10...v0.2.0) (2026-07-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* pass required query, header, and cookie params via a named Params struct ([#26](https://github.com/parallelworks/openapi-client-generator/issues/26))
+
+### Features
+
+* pass required query, header, and cookie params via a named Params struct ([#26](https://github.com/parallelworks/openapi-client-generator/issues/26)) ([c413dcb](https://github.com/parallelworks/openapi-client-generator/commit/c413dcb199dc2e55ecf4bfcb8259e044c195899f))
+
 ## [0.1.10](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.9...v0.1.10) (2026-07-01)
 
 
