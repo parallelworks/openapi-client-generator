@@ -224,21 +224,42 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 			}
 
 			td.Fields = append(td.Fields, &ir.Field{
-				Name:        naming.ToGoFieldName(propName),
-				JSONName:    propName,
-				Type:        goType,
-				Description: propSchema.Description,
-				Required:    required,
-				IsPointer:   isPointer,
-				OmitEmpty:   !required,
-				Deprecated:  propSchema.Deprecated != nil && *propSchema.Deprecated,
-				ReadOnly:    propSchema.ReadOnly != nil && *propSchema.ReadOnly,
-				WriteOnly:   propSchema.WriteOnly != nil && *propSchema.WriteOnly,
+				Name:                naming.ToGoFieldName(propName),
+				JSONName:            propName,
+				Type:                goType,
+				Description:         propSchema.Description,
+				Required:            required,
+				IsPointer:           isPointer,
+				OmitEmpty:           !required,
+				Deprecated:          propSchema.Deprecated != nil && *propSchema.Deprecated,
+				ReadOnly:            propSchema.ReadOnly != nil && *propSchema.ReadOnly,
+				WriteOnly:           propSchema.WriteOnly != nil && *propSchema.WriteOnly,
+				PrimaryErrorMessage: isPrimaryErrorMessage(propSchema),
 			})
 		}
 	}
 
 	return td, nil
+}
+
+// isPrimaryErrorMessage reports whether a property schema carries Kiota's
+// x-ms-primary-error-message extension marking it as the human-readable
+// error message.
+func isPrimaryErrorMessage(schema *highbase.Schema) bool {
+	if schema.Extensions == nil {
+		return false
+	}
+	for name, node := range schema.Extensions.FromOldest() {
+		if name != "x-ms-primary-error-message" || node == nil {
+			continue
+		}
+		var enabled bool
+		if err := node.Decode(&enabled); err != nil {
+			return false
+		}
+		return enabled
+	}
+	return false
 }
 
 // convertOneOf creates a union TypeDef from a oneOf composition.
@@ -355,16 +376,17 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 		}
 
 		td.Fields = append(td.Fields, &ir.Field{
-			Name:        naming.ToGoFieldName(propName),
-			JSONName:    propName,
-			Type:        goType,
-			Description: propSchema.Description,
-			Required:    required,
-			IsPointer:   isPointer,
-			OmitEmpty:   !required,
-			Deprecated:  propSchema.Deprecated != nil && *propSchema.Deprecated,
-			ReadOnly:    propSchema.ReadOnly != nil && *propSchema.ReadOnly,
-			WriteOnly:   propSchema.WriteOnly != nil && *propSchema.WriteOnly,
+			Name:                naming.ToGoFieldName(propName),
+			JSONName:            propName,
+			Type:                goType,
+			Description:         propSchema.Description,
+			Required:            required,
+			IsPointer:           isPointer,
+			OmitEmpty:           !required,
+			Deprecated:          propSchema.Deprecated != nil && *propSchema.Deprecated,
+			ReadOnly:            propSchema.ReadOnly != nil && *propSchema.ReadOnly,
+			WriteOnly:           propSchema.WriteOnly != nil && *propSchema.WriteOnly,
+			PrimaryErrorMessage: isPrimaryErrorMessage(propSchema),
 		})
 	}
 
