@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.0...v0.2.1) (2026-07-18)
+
+
+### Features
+
+* parsed error responses render the x-ms-primary-error-message field ([#31](https://github.com/parallelworks/openapi-client-generator/issues/31)) ([7388473](https://github.com/parallelworks/openapi-client-generator/commit/7388473829dccc1edd6d0d550b100c88356a090a))
+
 ## [0.2.0](https://github.com/parallelworks/openapi-client-generator/compare/v0.1.10...v0.2.0) (2026-07-01)
 
 
