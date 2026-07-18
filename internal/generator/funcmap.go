@@ -33,6 +33,7 @@ func FuncMap() template.FuncMap {
 		"paginationCursorField":   paginationCursorField,
 		"toGoName":                naming.ToGoName,
 		"uniqueErrorTypes":        uniqueErrorTypes,
+		"errorMessageField":       errorMessageField,
 		"errorType":               errorType,
 		"successContentType":      successContentType,
 	}
@@ -287,6 +288,22 @@ func uniqueErrorTypes(pkg *ir.Package) []string {
 		}
 	}
 	return types
+}
+
+// errorMessageField returns the error type's string field annotated with
+// x-ms-primary-error-message, or nil when the spec designates none.
+func errorMessageField(pkg *ir.Package, typeName string) *ir.Field {
+	for _, t := range pkg.Types {
+		if t.Name != typeName || t.Kind != ir.TypeKindStruct {
+			continue
+		}
+		for _, f := range t.Fields {
+			if f.PrimaryErrorMessage && (f.Type == "string" || f.Type == "*string") {
+				return f
+			}
+		}
+	}
+	return nil
 }
 
 // errorType returns the error response type name for an operation, or "".

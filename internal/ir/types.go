@@ -42,17 +42,18 @@ type TypeDef struct {
 
 // Field represents a struct field.
 type Field struct {
-	Name        string // Go field name (PascalCase)
-	JSONName    string // Original JSON property name (for struct tag)
-	Type        string // Go type expression (e.g., "string", "*int64", "[]User")
-	Description string
-	Required    bool
-	IsPointer   bool // Whether to use pointer type (nullable or optional)
-	OmitEmpty   bool // Whether to add omitempty to JSON tag
-	Embedded    bool // Whether this is an embedded (anonymous) field
-	Deprecated  bool
-	ReadOnly    bool
-	WriteOnly   bool
+	Name                string // Go field name (PascalCase)
+	JSONName            string // Original JSON property name (for struct tag)
+	Type                string // Go type expression (e.g., "string", "*int64", "[]User")
+	Description         string
+	Required            bool
+	IsPointer           bool // Whether to use pointer type (nullable or optional)
+	OmitEmpty           bool // Whether to add omitempty to JSON tag
+	Embedded            bool // Whether this is an embedded (anonymous) field
+	Deprecated          bool
+	ReadOnly            bool
+	WriteOnly           bool
+	PrimaryErrorMessage bool // Property annotated x-ms-primary-error-message
 }
 
 // EnumVal represents one value in an enum type.
