@@ -171,6 +171,40 @@ func TestGenerate_GoimportsSucceeds(t *testing.T) {
 	}
 }
 
+func TestGenerate_UserAgent(t *testing.T) {
+	clientContent := func(pkg *ir.Package) string {
+		gen, err := New(pkg)
+		if err != nil {
+			t.Fatalf("New() error: %v", err)
+		}
+		files, err := gen.Generate()
+		if err != nil {
+			t.Fatalf("Generate() error: %v", err)
+		}
+		for _, f := range files {
+			if f.Name == "client.go" {
+				return string(f.Content)
+			}
+		}
+		t.Fatal("expected client.go in generated files")
+		return ""
+	}
+
+	t.Run("custom user agent", func(t *testing.T) {
+		content := clientContent(&ir.Package{Name: "testpkg", UserAgent: "myproduct-sdk/2"})
+		if !strings.Contains(content, `userAgent:  "myproduct-sdk/2",`) {
+			t.Error("output missing custom userAgent default")
+		}
+	})
+
+	t.Run("default user agent", func(t *testing.T) {
+		content := clientContent(&ir.Package{Name: "testpkg"})
+		if !strings.Contains(content, `userAgent:  "openapi-client-generator/1.0",`) {
+			t.Error("output missing default userAgent")
+		}
+	})
+}
+
 func TestGenerate_AliasType(t *testing.T) {
 	pkg := &ir.Package{
 		Name: "testpkg",

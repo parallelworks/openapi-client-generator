@@ -50,6 +50,7 @@ openapi-client-generator generate --spec petstore.yaml --out ./gen/petstore
 | `--spec` | `-s` | Path to OpenAPI spec file (required) |
 | `--out` | `-o` | Output directory for generated code (required) |
 | `--package` | `-p` | Go package name (default: derived from output dir) |
+| `--user-agent` | | Default `User-Agent` for generated clients (default `openapi-client-generator/1.0`) |
 | `--allow-remote-refs` | | Allow fetching remote `$ref` targets |
 
 
