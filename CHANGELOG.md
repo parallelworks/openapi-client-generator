@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.1...v0.2.2) (2026-07-19)
+
+
+### Features
+
+* configurable User-Agent for generated clients ([#34](https://github.com/parallelworks/openapi-client-generator/issues/34)) ([7185ffc](https://github.com/parallelworks/openapi-client-generator/commit/7185ffc75bc4772d5d63cc79b404e88dda31a5ea))
+
 ## [0.2.1](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.0...v0.2.1) (2026-07-18)
 
 
