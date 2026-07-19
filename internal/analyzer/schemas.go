@@ -10,8 +10,8 @@ import (
 
 	highbase "github.com/pb33f/libopenapi/datamodel/high/base"
 
+	naming "github.com/giraffesyo/openapi-go-naming"
 	"github.com/parallelworks/openapi-client-generator/internal/ir"
-	"github.com/parallelworks/openapi-client-generator/internal/naming"
 )
 
 // convertSchema converts a single OpenAPI schema into an IR TypeDef.
@@ -91,10 +91,10 @@ func (a *Analyzer) convertEnum(goName string, schema *highbase.Schema, nullable 
 		if !ok {
 			continue
 		}
-		// RegisterName keeps the const unique against package types/other consts —
+		// Unique keeps the const unique against package types/other consts —
 		// two values that sanitize to the same identifier ("a-b"/"a b"), or a const
 		// that matches a schema-named type, would otherwise fail to compile.
-		constName := a.namer.RegisterName(goName + naming.ToGoName(raw))
+		constName := a.namer.Unique(naming.Exported(goName + " " + raw))
 		td.EnumValues = append(td.EnumValues, &ir.EnumVal{
 			Name:    constName,
 			Literal: literal,
@@ -175,7 +175,7 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 
 		if refName != "" {
 			// $ref to a known component schema: add as embedded field.
-			goTypeName := naming.ToGoName(refName)
+			goTypeName := naming.Exported(refName)
 			if td, ok := a.typesBySchema[refName]; ok {
 				goTypeName = td.Name
 			}
@@ -216,7 +216,7 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 
 			required := requiredSet[propName]
 			propNullable := isNullable(propSchema)
-			goType := a.resolveGoType(propSchema, goName+naming.ToGoFieldName(propName))
+			goType := a.resolveGoType(propSchema, goName+naming.Exported(propName))
 			isPointer := !required || propNullable
 
 			if isPointer && goType != "any" && !isSliceType(goType) && !isMapType(goType) {
@@ -224,7 +224,7 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 			}
 
 			td.Fields = append(td.Fields, &ir.Field{
-				Name:                naming.ToGoFieldName(propName),
+				Name:                naming.Exported(propName),
 				JSONName:            propName,
 				Type:                goType,
 				Description:         propSchema.Description,
@@ -293,7 +293,7 @@ func (a *Analyzer) convertUnion(goName string, schema *highbase.Schema, variants
 			for k, v := range schema.Discriminator.Mapping.FromOldest() {
 				// v is a $ref like "#/components/schemas/Circle"
 				refName := refToSchemaName(v)
-				goTypeName := naming.ToGoName(refName)
+				goTypeName := naming.Exported(refName)
 				if existing, ok := a.typesBySchema[refName]; ok {
 					goTypeName = existing.Name
 				}
@@ -309,7 +309,7 @@ func (a *Analyzer) convertUnion(goName string, schema *highbase.Schema, variants
 
 		var typeName string
 		if refName != "" {
-			typeName = naming.ToGoName(refName)
+			typeName = naming.Exported(refName)
 			if existing, ok := a.typesBySchema[refName]; ok {
 				typeName = existing.Name
 			}
@@ -368,7 +368,7 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 
 		required := requiredSet[propName]
 		propNullable := isNullable(propSchema)
-		goType := a.resolveGoType(propSchema, goName+naming.ToGoFieldName(propName))
+		goType := a.resolveGoType(propSchema, goName+naming.Exported(propName))
 		isPointer := !required || propNullable
 
 		if isPointer && goType != "any" && !isSliceType(goType) && !isMapType(goType) {
@@ -376,7 +376,7 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 		}
 
 		td.Fields = append(td.Fields, &ir.Field{
-			Name:                naming.ToGoFieldName(propName),
+			Name:                naming.Exported(propName),
 			JSONName:            propName,
 			Type:                goType,
 			Description:         propSchema.Description,
@@ -487,7 +487,7 @@ func (a *Analyzer) resolveGoType(schema *highbase.Schema, nameHint string) strin
 					return td.Name
 				}
 				// Not yet converted, use the Go name directly.
-				return naming.ToGoName(refName)
+				return naming.Exported(refName)
 			}
 		}
 	}
@@ -566,7 +566,7 @@ func (a *Analyzer) synthesizeInlineUnion(schema *highbase.Schema, nameHint strin
 		return existing.Name, true
 	}
 
-	goName := a.namer.RegisterName(naming.ToGoName(nameHint))
+	goName := a.namer.Unique(naming.Exported(nameHint))
 	td, err := a.convertUnion(goName, schema, variants, isNullable(schema))
 	if err != nil {
 		return "", false

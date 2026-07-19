@@ -5,8 +5,8 @@ import (
 	"strings"
 	"text/template"
 
+	naming "github.com/giraffesyo/openapi-go-naming"
 	"github.com/parallelworks/openapi-client-generator/internal/ir"
-	"github.com/parallelworks/openapi-client-generator/internal/naming"
 )
 
 // FuncMap returns the template.FuncMap used by all templates.
@@ -31,7 +31,7 @@ func FuncMap() template.FuncMap {
 		"hasPaginatedOps":         hasPaginatedOps,
 		"paginationItemType":      paginationItemType,
 		"paginationCursorField":   paginationCursorField,
-		"toGoName":                naming.ToGoName,
+		"toGoName":                naming.Exported,
 		"uniqueErrorTypes":        uniqueErrorTypes,
 		"errorMessageField":       errorMessageField,
 		"errorType":               errorType,
@@ -239,7 +239,7 @@ func hasUnions(types []*ir.TypeDef) bool {
 // discriminatorFieldName converts a JSON property name to a Go field name
 // for use in the discriminator struct in UnmarshalJSON.
 func discriminatorFieldName(propertyName string) string {
-	return naming.ToGoName(propertyName)
+	return naming.Exported(propertyName)
 }
 
 // hasPaginatedOps returns true if any operation has pagination configured.
@@ -272,7 +272,7 @@ func paginationCursorField(op *ir.OperationDef) string {
 			return p.FieldName
 		}
 	}
-	return naming.ToGoName(op.Pagination.CursorParam)
+	return naming.Exported(op.Pagination.CursorParam)
 }
 
 // uniqueErrorTypes returns deduplicated error response type names from all operations.

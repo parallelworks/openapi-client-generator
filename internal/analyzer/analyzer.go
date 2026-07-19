@@ -6,14 +6,14 @@ import (
 	highbase "github.com/pb33f/libopenapi/datamodel/high/base"
 	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
 
+	naming "github.com/giraffesyo/openapi-go-naming"
 	"github.com/parallelworks/openapi-client-generator/internal/ir"
-	"github.com/parallelworks/openapi-client-generator/internal/naming"
 )
 
 // Analyzer walks a parsed OpenAPI 3.1 model and produces IR types.
 type Analyzer struct {
 	model *v3high.Document
-	namer *naming.Namer
+	namer *naming.Scope
 	// typesBySchema tracks already-converted schema names to avoid duplicates.
 	typesBySchema map[string]*ir.TypeDef
 	// synthesized holds union types created for inline oneOf/anyOf schemas,
@@ -26,7 +26,7 @@ type Analyzer struct {
 func New(model *v3high.Document) *Analyzer {
 	return &Analyzer{
 		model:            model,
-		namer:            naming.NewNamer(),
+		namer:            naming.NewScope(),
 		typesBySchema:    make(map[string]*ir.TypeDef),
 		synthesizedByKey: make(map[string]*ir.TypeDef),
 	}
@@ -102,7 +102,7 @@ func (a *Analyzer) analyzeComponentSchemas(pkg *ir.Package) error {
 		if schema == nil {
 			continue
 		}
-		pending = append(pending, pendingSchema{name, a.namer.RegisterName(naming.ToGoName(name)), schema})
+		pending = append(pending, pendingSchema{name, a.namer.Unique(naming.Exported(name)), schema})
 	}
 
 	for _, p := range pending {
