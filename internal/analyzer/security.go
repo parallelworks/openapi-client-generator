@@ -5,8 +5,8 @@ import (
 
 	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
 
+	naming "github.com/giraffesyo/openapi-go-naming"
 	"github.com/parallelworks/openapi-client-generator/internal/ir"
-	"github.com/parallelworks/openapi-client-generator/internal/naming"
 )
 
 // analyzeSecuritySchemes walks Components.SecuritySchemes and populates pkg.AuthSchemes.
@@ -24,7 +24,7 @@ func (a *Analyzer) analyzeSecuritySchemes(pkg *ir.Package) error {
 
 		authScheme := &ir.AuthScheme{
 			Name:        schemeName,
-			GoName:      naming.ToGoName(schemeName),
+			GoName:      naming.Exported(schemeName),
 			Description: scheme.Description,
 		}
 

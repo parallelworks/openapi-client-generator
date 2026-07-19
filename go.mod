@@ -3,6 +3,7 @@ module github.com/parallelworks/openapi-client-generator
 go 1.25.5
 
 require (
+	github.com/giraffesyo/openapi-go-naming v0.1.1
 	github.com/pb33f/libopenapi v0.34.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/tools v0.42.0

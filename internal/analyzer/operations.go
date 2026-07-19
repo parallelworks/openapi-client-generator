@@ -7,8 +7,8 @@ import (
 	highbase "github.com/pb33f/libopenapi/datamodel/high/base"
 	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
 
+	naming "github.com/giraffesyo/openapi-go-naming"
 	"github.com/parallelworks/openapi-client-generator/internal/ir"
-	"github.com/parallelworks/openapi-client-generator/internal/naming"
 )
 
 // analyzeOperations walks all paths and operations, populating pkg.Operations.
@@ -161,11 +161,11 @@ func disambiguateParamNames(opDef *ir.OperationDef) {
 // operationName determines the Go method name for an operation.
 func (a *Analyzer) operationName(httpMethod, path string, op *v3high.Operation) string {
 	if op.OperationId != "" {
-		return naming.ToGoName(op.OperationId)
+		return naming.Exported(op.OperationId)
 	}
 	// Generate from HTTP method + path.
 	// e.g., GET /users/{id} → GetUsersByID
-	return naming.ToGoName(strings.ToLower(httpMethod) + " " + pathToWords(path))
+	return naming.Exported(strings.ToLower(httpMethod) + " " + pathToWords(path))
 }
 
 // pathToWords converts a URL path to space-separated words for naming.
@@ -223,8 +223,8 @@ func (a *Analyzer) convertParam(param *v3high.Parameter) (*ir.ParamDef, error) {
 	style, explode := effectiveStyleExplode(param)
 
 	return &ir.ParamDef{
-		Name:        naming.ToGoParamName(param.Name),
-		FieldName:   naming.ToGoFieldName(param.Name),
+		Name:        naming.Unexported(param.Name),
+		FieldName:   naming.Exported(param.Name),
 		OrigName:    param.Name,
 		Location:    param.In,
 		Type:        goType,
@@ -367,7 +367,7 @@ func (a *Analyzer) resolveMediaTypeSchema(mt *v3high.MediaType) string {
 			if td, ok := a.typesBySchema[refName]; ok {
 				return td.Name
 			}
-			return naming.ToGoName(refName)
+			return naming.Exported(refName)
 		}
 	}
 
