@@ -16,6 +16,7 @@ var generateFlags struct {
 	specPath        string
 	outputDir       string
 	packageName     string
+	userAgent       string
 	allowRemoteRefs bool
 }
 
@@ -25,6 +26,7 @@ func init() {
 	generateCmd.Flags().StringVarP(&generateFlags.specPath, "spec", "s", "", "path to OpenAPI spec file (required)")
 	generateCmd.Flags().StringVarP(&generateFlags.outputDir, "out", "o", "", "output directory for generated code (required)")
 	generateCmd.Flags().StringVarP(&generateFlags.packageName, "package", "p", "", "Go package name (default: derived from output dir)")
+	generateCmd.Flags().StringVar(&generateFlags.userAgent, "user-agent", "", `default User-Agent for generated clients (default "openapi-client-generator/1.0")`)
 	generateCmd.Flags().BoolVar(&generateFlags.allowRemoteRefs, "allow-remote-refs", false, "allow fetching remote $ref targets")
 
 	generateCmd.MarkFlagRequired("spec")
@@ -43,11 +45,11 @@ var generateCmd = &cobra.Command{
 			packageName = derivePackageName(generateFlags.outputDir)
 		}
 
-		return generate(generateFlags.specPath, generateFlags.outputDir, packageName, generateFlags.allowRemoteRefs)
+		return generate(generateFlags.specPath, generateFlags.outputDir, packageName, generateFlags.userAgent, generateFlags.allowRemoteRefs)
 	},
 }
 
-func generate(specPath, outputDir, packageName string, allowRemoteRefs bool) error {
+func generate(specPath, outputDir, packageName, userAgent string, allowRemoteRefs bool) error {
 	result, err := parser.Parse(specPath, parser.Config{
 		AllowRemoteRefs: allowRemoteRefs,
 	})
@@ -61,6 +63,7 @@ func generate(specPath, outputDir, packageName string, allowRemoteRefs bool) err
 	if err != nil {
 		return fmt.Errorf("analyzing spec: %w", err)
 	}
+	pkg.UserAgent = userAgent
 
 	gen, err := generator.New(pkg)
 	if err != nil {

@@ -21,11 +21,16 @@ type GeneratedFile struct {
 	Content []byte
 }
 
+const defaultUserAgent = "openapi-client-generator/1.0"
+
 // New creates a Generator for the given IR package, parsing all embedded templates.
 func New(pkg *ir.Package) (*Generator, error) {
 	tmpl, err := template.New("").Funcs(FuncMap()).ParseFS(templates.TemplateFS, "*.tmpl")
 	if err != nil {
 		return nil, fmt.Errorf("parsing templates: %w", err)
+	}
+	if pkg.UserAgent == "" {
+		pkg.UserAgent = defaultUserAgent
 	}
 	return &Generator{pkg: pkg, templates: tmpl}, nil
 }
