@@ -3,7 +3,7 @@
 package {{ .Name }}
 
 import (
-{{- if hasUnions .Types }}
+{{- if or (hasUnions .Types) (hasCatchAllTypes .Types) }}
 	"encoding/json"
 	"fmt"
 {{- end }}
@@ -11,12 +11,78 @@ import (
 )
 
 {{ range .Types }}
-{{ $typeDoc := typeDocComment . }}{{ if eq .Kind 0 }}{{ if $typeDoc }}{{ $typeDoc }}
+{{ $typeDoc := typeDocComment . }}{{ if eq .Kind 0 }}{{ $typeName := .Name }}{{ $td := . }}{{ if $typeDoc }}{{ $typeDoc }}
 {{ end }}type {{ .Name }} struct {
 {{ range .Fields }}{{ $fDoc := fieldDocComment . }}{{ if $fDoc }}{{ indent $fDoc }}
 {{ end }}{{ if .Embedded }}	{{ .Type }}
 {{ else }}	{{ .Name }} {{ .Type }} `json:"{{ jsonTag . }}"`
 {{ end }}{{ end }}}
+{{ with catchAllField . }}
+// MarshalJSON implements json.Marshaler for {{ $typeName }}, inlining
+// {{ .Name }} alongside the schema's declared properties.
+func (t {{ $typeName }}) MarshalJSON() ([]byte, error) {
+	type shadow {{ $typeName }}
+	data, err := json.Marshal(shadow(t))
+	if err != nil {
+		return nil, err
+	}
+	if len(t.{{ .Name }}) == 0 {
+		return data, nil
+	}
+
+	obj := make(map[string]json.RawMessage, len(t.{{ .Name }}))
+	for key, value := range t.{{ .Name }} {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling additional property %q: %w", key, err)
+		}
+		obj[key] = raw
+	}
+	for _, name := range []string{ {{ range $i, $n := declaredJSONNames $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} } {
+		delete(obj, name)
+	}
+
+	var declared map[string]json.RawMessage
+	if err := json.Unmarshal(data, &declared); err != nil {
+		return nil, err
+	}
+	for key, raw := range declared {
+		obj[key] = raw
+	}
+	return json.Marshal(obj)
+}
+
+// UnmarshalJSON implements json.Unmarshaler for {{ $typeName }}, collecting
+// properties the schema does not declare into {{ .Name }}.
+func (t *{{ $typeName }}) UnmarshalJSON(data []byte) error {
+	type shadow {{ $typeName }}
+	var s shadow
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	*t = {{ $typeName }}(s)
+
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+	for _, name := range []string{ {{ range $i, $n := declaredJSONNames $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} } {
+		delete(obj, name)
+	}
+	if len(obj) == 0 {
+		return nil
+	}
+	t.{{ .Name }} = make({{ .Type }}, len(obj))
+	for key, raw := range obj {
+		var value {{ catchAllValueType . }}
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return fmt.Errorf("unmarshaling additional property %q: %w", key, err)
+		}
+		t.{{ .Name }}[key] = value
+	}
+	return nil
+}
+{{ end }}
 {{ else if eq .Kind 1 }}{{ if $typeDoc }}{{ $typeDoc }}
 {{ end }}type {{ .Name }} = {{ .GoType }}
 {{ else if eq .Kind 2 }}{{ $typeName := .Name }}{{ if $typeDoc }}{{ $typeDoc }}
