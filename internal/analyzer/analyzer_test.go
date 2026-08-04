@@ -789,6 +789,8 @@ func TestComplexSchemas_AllTypesPresent(t *testing.T) {
 		"StringOrInt", "Metadata", "Labels", "Config",
 		"DogOrCircle", "Timestamped", "TimestampedDog",
 		"ShapeCollection", "ShapeCollectionShapesValue",
+		// Unions used directly as a request or response body.
+		"CreateShapeBody", "CreateShapeResponse", "NamedShape",
 	}
 
 	if len(pkg.Types) != len(expectedTypes) {

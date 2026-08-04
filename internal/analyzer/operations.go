@@ -83,7 +83,7 @@ func (a *Analyzer) convertOperation(httpMethod, path string, pathItem *v3high.Pa
 
 	// Request body.
 	if op.RequestBody != nil {
-		rbDef, err := a.convertRequestBody(op.RequestBody)
+		rbDef, err := a.convertRequestBody(op.RequestBody, name+"Body")
 		if err != nil {
 			return nil, fmt.Errorf("converting request body: %w", err)
 		}
@@ -92,7 +92,7 @@ func (a *Analyzer) convertOperation(httpMethod, path string, pathItem *v3high.Pa
 
 	// Responses.
 	if op.Responses != nil {
-		a.convertResponses(op.Responses, opDef)
+		a.convertResponses(op.Responses, opDef, name+"Response")
 	}
 
 	// Security requirements.
@@ -258,7 +258,7 @@ func effectiveStyleExplode(param *v3high.Parameter) (string, bool) {
 }
 
 // convertRequestBody converts an OpenAPI request body to an ir.RequestBodyDef.
-func (a *Analyzer) convertRequestBody(rb *v3high.RequestBody) (*ir.RequestBodyDef, error) {
+func (a *Analyzer) convertRequestBody(rb *v3high.RequestBody, nameHint string) (*ir.RequestBodyDef, error) {
 	def := &ir.RequestBodyDef{
 		Required:    rb.Required != nil && *rb.Required,
 		Description: rb.Description,
@@ -272,13 +272,13 @@ func (a *Analyzer) convertRequestBody(rb *v3high.RequestBody) (*ir.RequestBodyDe
 	for contentType, mediaType := range rb.Content.FromOldest() {
 		if strings.Contains(contentType, "json") {
 			def.ContentType = contentType
-			def.TypeName = a.resolveMediaTypeSchema(mediaType)
+			def.TypeName = a.resolveMediaTypeSchema(mediaType, nameHint)
 			break
 		}
 		if strings.Contains(contentType, "multipart") {
 			def.ContentType = contentType
 			def.IsMultipart = true
-			def.TypeName = a.resolveMediaTypeSchema(mediaType)
+			def.TypeName = a.resolveMediaTypeSchema(mediaType, nameHint)
 			break
 		}
 	}
@@ -287,7 +287,7 @@ func (a *Analyzer) convertRequestBody(rb *v3high.RequestBody) (*ir.RequestBodyDe
 	if def.ContentType == "" {
 		for contentType, mediaType := range rb.Content.FromOldest() {
 			def.ContentType = contentType
-			def.TypeName = a.resolveMediaTypeSchema(mediaType)
+			def.TypeName = a.resolveMediaTypeSchema(mediaType, nameHint)
 			break
 		}
 	}
@@ -296,10 +296,10 @@ func (a *Analyzer) convertRequestBody(rb *v3high.RequestBody) (*ir.RequestBodyDe
 }
 
 // convertResponses converts operation responses into the OperationDef fields.
-func (a *Analyzer) convertResponses(responses *v3high.Responses, opDef *ir.OperationDef) {
+func (a *Analyzer) convertResponses(responses *v3high.Responses, opDef *ir.OperationDef, nameHint string) {
 	if responses.Codes != nil {
 		for code, resp := range responses.Codes.FromOldest() {
-			rd := a.convertSingleResponse(code, resp)
+			rd := a.convertSingleResponse(code, resp, nameHint)
 			opDef.Responses = append(opDef.Responses, rd)
 
 			if isSuccessCode(code) {
@@ -315,7 +315,7 @@ func (a *Analyzer) convertResponses(responses *v3high.Responses, opDef *ir.Opera
 
 	// Handle the default response.
 	if responses.Default != nil {
-		rd := a.convertSingleResponse("default", responses.Default)
+		rd := a.convertSingleResponse("default", responses.Default, nameHint)
 		rd.IsError = true
 		opDef.Responses = append(opDef.Responses, rd)
 		opDef.ErrorResponses = append(opDef.ErrorResponses, rd)
@@ -323,7 +323,7 @@ func (a *Analyzer) convertResponses(responses *v3high.Responses, opDef *ir.Opera
 }
 
 // convertSingleResponse converts one response code/definition to an ir.ResponseDef.
-func (a *Analyzer) convertSingleResponse(code string, resp *v3high.Response) *ir.ResponseDef {
+func (a *Analyzer) convertSingleResponse(code string, resp *v3high.Response, nameHint string) *ir.ResponseDef {
 	rd := &ir.ResponseDef{
 		StatusCode:  code,
 		Description: resp.Description,
@@ -333,7 +333,7 @@ func (a *Analyzer) convertSingleResponse(code string, resp *v3high.Response) *ir
 		for contentType, mediaType := range resp.Content.FromOldest() {
 			if strings.Contains(contentType, "json") {
 				rd.ContentType = contentType
-				rd.TypeName = a.resolveMediaTypeSchema(mediaType)
+				rd.TypeName = a.resolveMediaTypeSchema(mediaType, nameHint)
 				break
 			}
 		}
@@ -341,7 +341,7 @@ func (a *Analyzer) convertSingleResponse(code string, resp *v3high.Response) *ir
 		if rd.ContentType == "" {
 			for contentType, mediaType := range resp.Content.FromOldest() {
 				rd.ContentType = contentType
-				rd.TypeName = a.resolveMediaTypeSchema(mediaType)
+				rd.TypeName = a.resolveMediaTypeSchema(mediaType, nameHint)
 				if rd.TypeName == "" && strings.HasPrefix(contentType, "text/") {
 					rd.TypeName = "string"
 				}
@@ -354,7 +354,7 @@ func (a *Analyzer) convertSingleResponse(code string, resp *v3high.Response) *ir
 }
 
 // resolveMediaTypeSchema extracts the Go type name from a media type's schema.
-func (a *Analyzer) resolveMediaTypeSchema(mt *v3high.MediaType) string {
+func (a *Analyzer) resolveMediaTypeSchema(mt *v3high.MediaType, nameHint string) string {
 	if mt == nil || mt.Schema == nil {
 		return ""
 	}
@@ -375,7 +375,7 @@ func (a *Analyzer) resolveMediaTypeSchema(mt *v3high.MediaType) string {
 	if err != nil || schema == nil {
 		return ""
 	}
-	return a.resolveGoType(schema, "")
+	return a.resolveGoType(schema, nameHint)
 }
 
 // convertSecurityReqs converts OpenAPI security requirements to IR.

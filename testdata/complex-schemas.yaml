@@ -5,7 +5,57 @@ info:
   description: Test spec for advanced schema composition
 servers:
   - url: https://api.example.com/v1
-paths: {}
+paths:
+  /shapes:
+    post:
+      operationId: createShape
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/Circle"
+                - $ref: "#/components/schemas/Rectangle"
+              discriminator:
+                propertyName: kind
+                mapping:
+                  circle: "#/components/schemas/Circle"
+                  rectangle: "#/components/schemas/Rectangle"
+      responses:
+        "200":
+          description: the stored shape
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Dog"
+                  - $ref: "#/components/schemas/Rectangle"
+                discriminator:
+                  propertyName: kind
+                  mapping:
+                    dog: "#/components/schemas/Dog"
+                    rectangle: "#/components/schemas/Rectangle"
+  /titled-shapes:
+    post:
+      operationId: createTitledShape
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              title: NamedShape
+              oneOf:
+                - $ref: "#/components/schemas/Circle"
+                - $ref: "#/components/schemas/Dog"
+              discriminator:
+                propertyName: kind
+                mapping:
+                  circle: "#/components/schemas/Circle"
+                  dog: "#/components/schemas/Dog"
+      responses:
+        "204":
+          description: stored
 components:
   schemas:
     # --- Base types ---

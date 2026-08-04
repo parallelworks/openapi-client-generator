@@ -541,6 +541,12 @@ func (a *Analyzer) synthesizeInlineUnion(schema *highbase.Schema, nameHint strin
 		variants = schema.AnyOf
 		kind = "anyOf"
 	}
+	// A titled union names itself, which keeps the generated name stable when
+	// the operation that reaches it first changes. Untitled unions fall back to
+	// the caller's hint.
+	if schema.Title != "" {
+		nameHint = schema.Title
+	}
 	if len(variants) == 0 || nameHint == "" {
 		return "", false
 	}
