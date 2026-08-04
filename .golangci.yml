@@ -1,0 +1,14 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - misspell
+    - usetesting
+  exclusions:
+    rules:
+      # Test helpers assert on the values they read; an unchecked error there is
+      # reported by the surrounding t.Fatal path.
+      - path: _test\.go
+        linters:
+          - errcheck
