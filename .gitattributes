@@ -1,0 +1,3 @@
+# The generator emits template bytes verbatim, so a CRLF checkout would leak
+# CRLF into every generated .go file.
+* text=auto eol=lf

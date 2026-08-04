@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -29,8 +30,11 @@ func init() {
 	generateCmd.Flags().StringVar(&generateFlags.userAgent, "user-agent", "", `default User-Agent for generated clients (default "openapi-client-generator/1.0")`)
 	generateCmd.Flags().BoolVar(&generateFlags.allowRemoteRefs, "allow-remote-refs", false, "allow fetching remote $ref targets")
 
-	generateCmd.MarkFlagRequired("spec")
-	generateCmd.MarkFlagRequired("out")
+	// init cannot return, so a flag-registration failure is deferred to Execute.
+	setupErr = errors.Join(
+		generateCmd.MarkFlagRequired("spec"),
+		generateCmd.MarkFlagRequired("out"),
+	)
 }
 
 var generateCmd = &cobra.Command{

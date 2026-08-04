@@ -13,6 +13,12 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+defaults:
+  run:
+    # The Windows runner defaults to PowerShell, which mangles `-flag=value.ext`
+    # into two arguments.
+    shell: bash
+
 jobs:
   lint:
     runs-on: ubuntu-latest
