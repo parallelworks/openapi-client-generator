@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.2...v0.2.3) (2026-08-04)
+
+
+### Bug Fixes
+
+* unions used as a request or response body generate typed instead of any ([#36](https://github.com/parallelworks/openapi-client-generator/issues/36)) ([a40e2ca](https://github.com/parallelworks/openapi-client-generator/commit/a40e2ca176ba133b2561aaa0a5cc7313aa4bacc0))
+
 ## [0.2.2](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.1...v0.2.2) (2026-07-19)
 
 
