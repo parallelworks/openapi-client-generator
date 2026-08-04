@@ -131,6 +131,30 @@ func main() {
 }
 ```
 
+### Discriminated unions
+
+A `oneOf`/`anyOf` with a `discriminator` generates a wrapper whose `Value` holds
+the decoded variant. A discriminator value the client does not know is **not** an
+error: `Value` stays nil, the original JSON is kept, and re-marshaling returns it
+unchanged. Adding a variant server-side therefore stays backward compatible, and
+one unrecognized element does not fail the payload it appears in.
+
+```go
+for _, shape := range shapes {
+    if shape.IsUnknownVariant() {
+        log.Printf("skipping unsupported shape %q", shape.UnknownDiscriminator())
+        continue // shape.Raw() still holds the original JSON
+    }
+    switch v := shape.Value.(type) {
+    case petstore.Circle:
+        ...
+    }
+}
+```
+
+A union *without* a discriminator still fails when no variant matches, since there
+is nothing to identify the payload by.
+
 ## License
 
 [MIT](LICENSE) — Copyright (c) 2026 Parallel Works

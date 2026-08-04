@@ -93,9 +93,46 @@ func TestUnionValueTypeSwitch(t *testing.T) {
 		t.Errorf("marshal lost the discriminator: %s", out)
 	}
 
-	var bad ShapeCollectionShapesValue
-	if err := json.Unmarshal([]byte(` + "`" + `{"shapeType":"hexagon"}` + "`" + `), &bad); err == nil {
-		t.Fatal("expected an error for an unknown shapeType, got nil")
+	var unknown ShapeCollectionShapesValue
+	if err := json.Unmarshal([]byte(` + "`" + `{"shapeType":"hexagon","sides":6}` + "`" + `), &unknown); err != nil {
+		t.Fatalf("unknown shapeType should decode, got: %v", err)
+	}
+	if !unknown.IsUnknownVariant() {
+		t.Error("expected IsUnknownVariant for an unmapped shapeType")
+	}
+	if unknown.Value != nil {
+		t.Errorf("Value = %v, want nil for an unknown variant", unknown.Value)
+	}
+	if unknown.UnknownDiscriminator() != "hexagon" {
+		t.Errorf("UnknownDiscriminator() = %q, want hexagon", unknown.UnknownDiscriminator())
+	}
+
+	back, err := json.Marshal(unknown)
+	if err != nil {
+		t.Fatalf("marshal unknown: %v", err)
+	}
+	if !strings.Contains(string(back), ` + "`" + `"sides":6` + "`" + `) {
+		t.Errorf("re-marshal lost the unknown variant's payload: %s", back)
+	}
+}
+
+func TestUnknownVariantDoesNotFailSiblings(t *testing.T) {
+	payload := []byte(` + "`" + `{
+		"shapes": {
+			"a": {"shapeType": "circle", "radius": 2.5},
+			"b": {"shapeType": "triangle", "base": 2, "height": 3}
+		}
+	}` + "`" + `)
+
+	var sc ShapeCollection
+	if err := json.Unmarshal(payload, &sc); err != nil {
+		t.Fatalf("one unknown variant failed the whole decode: %v", err)
+	}
+	if _, ok := sc.Shapes["a"].Value.(Circle); !ok {
+		t.Fatalf("shapes[a].Value = %T, want Circle", sc.Shapes["a"].Value)
+	}
+	if !sc.Shapes["b"].IsUnknownVariant() {
+		t.Error("shapes[b] should be an unknown variant")
 	}
 }
 `)
