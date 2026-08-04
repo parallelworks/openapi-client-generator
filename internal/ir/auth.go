@@ -12,10 +12,10 @@ const (
 
 // AuthScheme represents a security scheme from the spec.
 type AuthScheme struct {
-	Name         string   // Identifier from the spec
-	GoName       string   // Go identifier
-	Type         AuthType
-	Description  string
+	Name        string // Identifier from the spec
+	GoName      string // Go identifier
+	Type        AuthType
+	Description string
 	// For APIKey:
 	APIKeyName string // Header/query parameter name
 	APIKeyIn   string // "header", "query", "cookie"

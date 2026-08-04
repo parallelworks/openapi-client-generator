@@ -2,11 +2,11 @@ package ir
 
 // OperationDef represents a single API operation.
 type OperationDef struct {
-	Name            string          // Go method name (e.g., "ListUsers")
-	Summary         string          // Short summary from the spec
+	Name            string // Go method name (e.g., "ListUsers")
+	Summary         string // Short summary from the spec
 	Description     string
-	HTTPMethod      string          // "GET", "POST", etc.
-	Path            string          // URL path template (e.g., "/users/{id}")
+	HTTPMethod      string // "GET", "POST", etc.
+	Path            string // URL path template (e.g., "/users/{id}")
 	Tags            []string
 	PathParams      []*ParamDef
 	QueryParams     []*ParamDef
