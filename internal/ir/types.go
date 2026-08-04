@@ -54,6 +54,7 @@ type Field struct {
 	ReadOnly            bool
 	WriteOnly           bool
 	PrimaryErrorMessage bool // Property annotated x-ms-primary-error-message
+	CatchAll            bool // Synthetic field holding the schema's additionalProperties
 }
 
 // EnumVal represents one value in an enum type.

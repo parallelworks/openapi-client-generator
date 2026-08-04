@@ -27,6 +27,10 @@ func FuncMap() template.FuncMap {
 		"hasRequiredCookieParams": hasRequiredCookieParams,
 		"paramType":               paramType,
 		"hasUnions":               hasUnions,
+		"catchAllField":           catchAllField,
+		"catchAllValueType":       catchAllValueType,
+		"declaredJSONNames":       declaredJSONNames,
+		"hasCatchAllTypes":        hasCatchAllTypes,
 		"discriminatorFieldName":  discriminatorFieldName,
 		"hasPaginatedOps":         hasPaginatedOps,
 		"paginationItemType":      paginationItemType,
@@ -176,11 +180,54 @@ func indent(s string) string {
 // jsonTag returns the JSON struct tag value for a field.
 // It returns "fieldName,omitempty" for optional fields and "fieldName" for required ones.
 func jsonTag(f *ir.Field) string {
+	// encoding/json only skips a field when the tag is exactly "-"; appending
+	// anything turns it into a property literally named "-".
+	if f.JSONName == "-" {
+		return "-"
+	}
 	tag := f.JSONName
 	if f.OmitEmpty {
 		tag += ",omitempty"
 	}
 	return tag
+}
+
+// catchAllField returns the synthetic additionalProperties field of a struct, if any.
+func catchAllField(td *ir.TypeDef) *ir.Field {
+	if td.Kind != ir.TypeKindStruct {
+		return nil
+	}
+	for _, f := range td.Fields {
+		if f.CatchAll {
+			return f
+		}
+	}
+	return nil
+}
+
+// catchAllValueType returns the map value type of a catch-all field, e.g. "any"
+// for a map[string]any.
+func catchAllValueType(f *ir.Field) string {
+	return strings.TrimPrefix(f.Type, "map[string]")
+}
+
+// declaredJSONNames returns the wire names of a struct's non-catch-all fields.
+func declaredJSONNames(td *ir.TypeDef) []string {
+	var names []string
+	for _, f := range td.Fields {
+		if f.CatchAll || f.Embedded || f.JSONName == "" || f.JSONName == "-" {
+			continue
+		}
+		names = append(names, f.JSONName)
+	}
+	return names
+}
+
+// hasCatchAllTypes returns true if any type needs the additionalProperties marshalers.
+func hasCatchAllTypes(types []*ir.TypeDef) bool {
+	return slices.ContainsFunc(types, func(td *ir.TypeDef) bool {
+		return catchAllField(td) != nil
+	})
 }
 
 // hasOperations returns true if the package has any operations defined.

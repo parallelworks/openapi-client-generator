@@ -753,6 +753,12 @@ func TestAdditionalProperties_WithProperties(t *testing.T) {
 	if apField.Type != "map[string]string" {
 		t.Errorf("Config.AdditionalProperties type = %q, want map[string]string", apField.Type)
 	}
+	if !apField.CatchAll {
+		t.Error("Config.AdditionalProperties should be marked CatchAll")
+	}
+	if apField.OmitEmpty {
+		t.Error("Config.AdditionalProperties must not set OmitEmpty; the tag has to stay exactly \"-\"")
+	}
 }
 
 func TestOneOf_DogOrCircle(t *testing.T) {

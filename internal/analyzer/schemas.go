@@ -391,13 +391,16 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 	}
 
 	// If the object has both properties and additionalProperties, add an extra field.
+	// The generator gives such structs MarshalJSON/UnmarshalJSON so the map is
+	// inlined into the object rather than nested under a key of its own.
 	if schema.AdditionalProperties != nil {
 		mapValueType := a.resolveAdditionalPropertiesType(schema, goName)
 		td.Fields = append(td.Fields, &ir.Field{
-			Name:      "AdditionalProperties",
-			JSONName:  "-",
-			Type:      "map[string]" + mapValueType,
-			OmitEmpty: true,
+			Name:        "AdditionalProperties",
+			JSONName:    "-",
+			Type:        "map[string]" + mapValueType,
+			Description: "Properties not defined by the schema.",
+			CatchAll:    true,
 		})
 	}
 

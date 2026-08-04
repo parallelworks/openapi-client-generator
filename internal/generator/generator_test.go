@@ -503,6 +503,7 @@ func TestJsonTag(t *testing.T) {
 		{&ir.Field{JSONName: "name"}, "name"},
 		{&ir.Field{JSONName: "tag", OmitEmpty: true}, "tag,omitempty"},
 		{&ir.Field{JSONName: "id", OmitEmpty: false}, "id"},
+		{&ir.Field{JSONName: "-", OmitEmpty: true}, "-"},
 	}
 	for _, tt := range tests {
 		got := jsonTag(tt.field)
