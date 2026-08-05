@@ -58,6 +58,82 @@ components:
           properties:
             note: { type: string }
       additionalProperties: true
+    Parent:
+      type: object
+      properties:
+        id: { type: string }
+      additionalProperties: true
+    Child:
+      allOf:
+        - $ref: "#/components/schemas/Parent"
+        - type: object
+          properties:
+            name: { type: string }
+      additionalProperties: true
+    GrandChild:
+      allOf:
+        - $ref: "#/components/schemas/Child"
+        - type: object
+          properties:
+            depth: { type: integer }
+      additionalProperties: true
+    TwinA:
+      type: object
+      properties:
+        a: { type: string }
+      additionalProperties: true
+    TwinB:
+      type: object
+      properties:
+        b: { type: string }
+      additionalProperties: true
+    TwoParents:
+      allOf:
+        - $ref: "#/components/schemas/TwinA"
+        - $ref: "#/components/schemas/TwinB"
+        - type: object
+          properties:
+            own: { type: string }
+    Circle:
+      type: object
+      properties:
+        radius: { type: number }
+    Shape:
+      oneOf:
+        - $ref: "#/components/schemas/Circle"
+        - type: string
+    Tagged:
+      allOf:
+        - $ref: "#/components/schemas/Shape"
+        - type: object
+          properties:
+            label: { type: string }
+      additionalProperties: true
+    LabeledShape:
+      allOf:
+        - $ref: "#/components/schemas/Shape"
+        - type: object
+          properties:
+            title: { type: string }
+    StrictChild:
+      allOf:
+        - $ref: "#/components/schemas/Parent"
+        - type: object
+          properties:
+            name: { type: string }
+      additionalProperties:
+        type: string
+    Node:
+      allOf:
+        - $ref: "#/components/schemas/NodeBase"
+        - type: object
+          properties:
+            label: { type: string }
+      additionalProperties: true
+    NodeBase:
+      allOf:
+        - $ref: "#/components/schemas/Node"
+      additionalProperties: true
 `
 
 const additionalPropertiesRuntimeTest = `package petsapi
@@ -234,6 +310,287 @@ func TestOffTypeExtraDoesNotFailTheDecode(t *testing.T) {
 	}
 	if _, ok := l.AdditionalProperties["count"]; ok {
 		t.Error("a property that does not match the declared value type was kept anyway")
+	}
+}
+
+// An embedded schema with additionalProperties of its own must not let its
+// promoted unmarshaler sweep the composed type's declared fields into the
+// embedded catch-all.
+func TestEmbeddedCatchAllDoesNotSwallowDeclaredFields(t *testing.T) {
+	var c Child
+	if err := json.Unmarshal([]byte(` + "`" + `{"id":"x","name":"n","extra":"e"}` + "`" + `), &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if c.ID == nil || *c.ID != "x" {
+		t.Errorf("inherited property lost: %v", c.ID)
+	}
+	if c.Name == nil || *c.Name != "n" {
+		t.Errorf("declared property swallowed by the embedded catch-all: %v", c.Name)
+	}
+	if got := c.AdditionalProperties["extra"]; got != "e" {
+		t.Errorf("AdditionalProperties[extra] = %v, want e", got)
+	}
+	if len(c.Parent.AdditionalProperties) != 0 {
+		t.Errorf("embedded catch-all should stay empty, got %v", c.Parent.AdditionalProperties)
+	}
+
+	out, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{` + "`" + `"id"` + "`" + `, ` + "`" + `"name"` + "`" + `, ` + "`" + `"extra"` + "`" + `} {
+		if n := strings.Count(string(out), key); n != 1 {
+			t.Errorf("%s emitted %d times: %s", key, n, out)
+		}
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("re-unmarshal: %v", err)
+	}
+	want := map[string]any{"id": "x", "name": "n", "extra": "e"}
+	if len(got) != len(want) {
+		t.Fatalf("round trip = %s, want %v", out, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("round trip[%s] = %v, want %v", k, got[k], v)
+		}
+	}
+}
+
+// The same swallowing, two levels deep: the grandparent's catch-all sits behind
+// two promotions.
+func TestEmbeddedCatchAllChainThroughGrandparent(t *testing.T) {
+	var g GrandChild
+	if err := json.Unmarshal([]byte(` + "`" + `{"id":"x","name":"n","depth":2,"extra":"e"}` + "`" + `), &g); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if g.ID == nil || *g.ID != "x" {
+		t.Errorf("grandparent property lost: %v", g.ID)
+	}
+	if g.Name == nil || *g.Name != "n" {
+		t.Errorf("parent property lost: %v", g.Name)
+	}
+	if g.Depth == nil || *g.Depth != 2 {
+		t.Errorf("declared property lost: %v", g.Depth)
+	}
+	if got := g.AdditionalProperties["extra"]; got != "e" {
+		t.Errorf("AdditionalProperties[extra] = %v, want e", got)
+	}
+	if len(g.Child.AdditionalProperties) != 0 || len(g.Child.Parent.AdditionalProperties) != 0 {
+		t.Errorf("embedded catch-alls should stay empty, got %v and %v",
+			g.Child.AdditionalProperties, g.Child.Parent.AdditionalProperties)
+	}
+
+	out, err := json.Marshal(g)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{` + "`" + `"id"` + "`" + `, ` + "`" + `"name"` + "`" + `, ` + "`" + `"depth"` + "`" + `, ` + "`" + `"extra"` + "`" + `} {
+		if n := strings.Count(string(out), key); n != 1 {
+			t.Errorf("%s emitted %d times: %s", key, n, out)
+		}
+	}
+}
+
+// With two embedded catch-all parents Go promotes no marshalers at all (the
+// selector is ambiguous), so without generated ones the behavior flips on how
+// many parents a schema composes. The composed schema declares no
+// additionalProperties of its own; the extras stay on the embedded parents.
+func TestTwoEmbeddedCatchAllParents(t *testing.T) {
+	var p TwoParents
+	if err := json.Unmarshal([]byte(` + "`" + `{"a":"1","b":"2","own":"3","extra":"e"}` + "`" + `), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.A == nil || *p.A != "1" {
+		t.Errorf("A = %v, want 1", p.A)
+	}
+	if p.B == nil || *p.B != "2" {
+		t.Errorf("B = %v, want 2", p.B)
+	}
+	if p.Own == nil || *p.Own != "3" {
+		t.Errorf("Own = %v, want 3", p.Own)
+	}
+	if got := p.TwinA.AdditionalProperties["extra"]; got != "e" {
+		t.Errorf("TwinA.AdditionalProperties[extra] = %v, want e", got)
+	}
+	for _, key := range []string{"a", "b", "own"} {
+		if _, ok := p.TwinA.AdditionalProperties[key]; ok {
+			t.Errorf("declared property %q landed in TwinA's catch-all", key)
+		}
+		if _, ok := p.TwinB.AdditionalProperties[key]; ok {
+			t.Errorf("declared property %q landed in TwinB's catch-all", key)
+		}
+	}
+
+	out, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{` + "`" + `"a"` + "`" + `, ` + "`" + `"b"` + "`" + `, ` + "`" + `"own"` + "`" + `, ` + "`" + `"extra"` + "`" + `} {
+		if n := strings.Count(string(out), key); n != 1 {
+			t.Errorf("%s emitted %d times: %s", key, n, out)
+		}
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("re-unmarshal: %v", err)
+	}
+	want := map[string]any{"a": "1", "b": "2", "own": "3", "extra": "e"}
+	if len(got) != len(want) {
+		t.Fatalf("round trip = %s, want %v", out, want)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("round trip[%s] = %v, want %v", k, got[k], v)
+		}
+	}
+}
+
+// A composed type embedding a union keeps its own fields: promotion would let
+// the union's marshaler emit only the union value.
+func TestEmbeddedUnionObjectVariant(t *testing.T) {
+	var v Tagged
+	if err := json.Unmarshal([]byte(` + "`" + `{"radius":1.5,"label":"L","extra":"e"}` + "`" + `), &v); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if v.Label == nil || *v.Label != "L" {
+		t.Errorf("Label = %v, want L", v.Label)
+	}
+	circle, ok := v.Shape.Value.(Circle)
+	if !ok {
+		t.Fatalf("Shape.Value = %T, want Circle", v.Shape.Value)
+	}
+	if circle.Radius == nil || *circle.Radius != 1.5 {
+		t.Errorf("Radius = %v, want 1.5", circle.Radius)
+	}
+	if _, ok := v.AdditionalProperties["radius"]; ok {
+		t.Errorf("union variant property leaked into AdditionalProperties: %v", v.AdditionalProperties)
+	}
+
+	out, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{` + "`" + `"radius"` + "`" + `, ` + "`" + `"label"` + "`" + `, ` + "`" + `"extra"` + "`" + `} {
+		if n := strings.Count(string(out), key); n != 1 {
+			t.Errorf("%s emitted %d times: %s", key, n, out)
+		}
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("re-unmarshal: %v", err)
+	}
+	for k, want := range map[string]any{"radius": 1.5, "label": "L", "extra": "e"} {
+		if got[k] != want {
+			t.Errorf("round trip[%s] = %v, want %v", k, got[k], want)
+		}
+	}
+
+	two := 2.0
+	v.Shape.Value = Circle{Radius: &two}
+	updated, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal updated: %v", err)
+	}
+	var re map[string]any
+	if err := json.Unmarshal(updated, &re); err != nil {
+		t.Fatalf("re-unmarshal updated: %v", err)
+	}
+	if re["radius"] != 2.0 {
+		t.Errorf("stale catch-all copy overrode the updated union value: %s", updated)
+	}
+}
+
+// A schema with no additionalProperties of its own still needs marshalers when
+// it embeds a type that has them, or the promotion swallows its fields anyway.
+func TestEmbeddedUnionWithoutOwnCatchAll(t *testing.T) {
+	var s LabeledShape
+	if err := json.Unmarshal([]byte(` + "`" + `{"radius":2,"title":"T"}` + "`" + `), &s); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if s.Title == nil || *s.Title != "T" {
+		t.Errorf("Title = %v, want T", s.Title)
+	}
+	circle, ok := s.Shape.Value.(Circle)
+	if !ok {
+		t.Fatalf("Shape.Value = %T, want Circle", s.Shape.Value)
+	}
+	if circle.Radius == nil || *circle.Radius != 2 {
+		t.Errorf("Radius = %v, want 2", circle.Radius)
+	}
+
+	out, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{` + "`" + `"radius"` + "`" + `, ` + "`" + `"title"` + "`" + `} {
+		if n := strings.Count(string(out), key); n != 1 {
+			t.Errorf("%s emitted %d times: %s", key, n, out)
+		}
+	}
+}
+
+// A scalar union value cannot be part of a JSON object, so marshaling fails
+// with an error that names the embedded field.
+func TestEmbeddedUnionScalarVariantFailsWithNamedError(t *testing.T) {
+	label := "L"
+	v := Tagged{Shape: Shape{Value: "not an object"}, Label: &label}
+	if _, err := json.Marshal(v); err == nil || !strings.Contains(err.Error(), "Shape") {
+		t.Errorf("marshal = %v, want an error naming the embedded Shape", err)
+	}
+}
+
+// The composed type's catch-all is narrower than the embedded one, so an extra
+// only the wider embedded map can hold must survive there.
+func TestOffTypeExtraSurvivesInTheWiderEmbeddedCatchAll(t *testing.T) {
+	var s StrictChild
+	if err := json.Unmarshal([]byte(` + "`" + `{"id":"x","name":"n","note":"ok","count":3}` + "`" + `), &s); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := s.AdditionalProperties["note"]; got != "ok" {
+		t.Errorf("AdditionalProperties[note] = %v, want ok", got)
+	}
+	if _, ok := s.AdditionalProperties["count"]; ok {
+		t.Errorf("off-type extra landed in the string catch-all: %v", s.AdditionalProperties)
+	}
+	if got := s.Parent.AdditionalProperties["count"]; got != float64(3) {
+		t.Errorf("Parent.AdditionalProperties[count] = %v, want 3", got)
+	}
+
+	out, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{` + "`" + `"id"` + "`" + `, ` + "`" + `"name"` + "`" + `, ` + "`" + `"note"` + "`" + `, ` + "`" + `"count"` + "`" + `} {
+		if n := strings.Count(string(out), key); n != 1 {
+			t.Errorf("%s emitted %d times: %s", key, n, out)
+		}
+	}
+}
+
+// Mutually recursive allOf schemas embed each other; decoding must terminate
+// instead of re-entering the same unmarshaler until the stack overflows.
+func TestCyclicSchemasDecodeWithoutOverflowingTheStack(t *testing.T) {
+	var node Node
+	if err := json.Unmarshal([]byte(` + "`" + `{"label":"a","extra":"e"}` + "`" + `), &node); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if node.Label == nil || *node.Label != "a" {
+		t.Errorf("Label = %v, want a", node.Label)
+	}
+	if got := node.AdditionalProperties["extra"]; got != "e" {
+		t.Errorf("AdditionalProperties[extra] = %v, want e", got)
+	}
+
+	out, err := json.Marshal(node)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{` + "`" + `"label"` + "`" + `, ` + "`" + `"extra"` + "`" + `} {
+		if n := strings.Count(string(out), key); n != 1 {
+			t.Errorf("%s emitted %d times: %s", key, n, out)
+		}
 	}
 }
 

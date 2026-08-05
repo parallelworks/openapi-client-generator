@@ -1,7 +1,6 @@
 package analyzer
 
 import (
-	"slices"
 	"strings"
 
 	"github.com/parallelworks/openapi-client-generator/internal/ir"
@@ -97,46 +96,6 @@ func breakStructCycles(types []*ir.TypeDef) {
 	for _, td := range types {
 		if td != nil && td.Kind == ir.TypeKindStruct && state[td.Name] == 0 {
 			walk(td)
-		}
-	}
-}
-
-// dropShadowedCatchAlls removes the catch-all from a struct that embeds one,
-// whose promoted marshalers would otherwise win and emit only their own fields.
-func dropShadowedCatchAlls(types []*ir.TypeDef) {
-	byName := ir.TypesByName(types)
-
-	hasCatchAll := func(td *ir.TypeDef) bool {
-		return slices.ContainsFunc(td.Fields, func(f *ir.Field) bool { return f.CatchAll })
-	}
-
-	// Reports whether td or anything it embeds carries a catch-all.
-	var embedsCatchAll func(td *ir.TypeDef, depth int) bool
-	embedsCatchAll = func(td *ir.TypeDef, depth int) bool {
-		if td == nil || depth > len(types) {
-			return false
-		}
-		for _, f := range td.Fields {
-			if !f.Embedded {
-				continue
-			}
-			embedded := ir.StructNamed(byName, strings.TrimPrefix(f.Type, "*"))
-			if embedded == nil {
-				continue
-			}
-			if hasCatchAll(embedded) || embedsCatchAll(embedded, depth+1) {
-				return true
-			}
-		}
-		return false
-	}
-
-	for _, td := range types {
-		if td == nil || td.Kind != ir.TypeKindStruct || !hasCatchAll(td) {
-			continue
-		}
-		if embedsCatchAll(td, 0) {
-			td.Fields = slices.DeleteFunc(td.Fields, func(f *ir.Field) bool { return f.CatchAll })
 		}
 	}
 }
