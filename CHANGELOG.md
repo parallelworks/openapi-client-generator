@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.4](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.3...v0.2.4) (2026-08-04)
+
+
+### Bug Fixes
+
+* additionalProperties are dropped on decode and sent as a "-" key ([#40](https://github.com/parallelworks/openapi-client-generator/issues/40)) ([a4591a5](https://github.com/parallelworks/openapi-client-generator/commit/a4591a569386db2859ab4ffc8d2e904197d29626))
+* an unknown discriminator value no longer fails the whole decode ([#41](https://github.com/parallelworks/openapi-client-generator/issues/41)) ([ff8808c](https://github.com/parallelworks/openapi-client-generator/commit/ff8808c138745f1c61ca5c99bf1c66c3d9a4fc95))
+
 ## [0.2.3](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.2...v0.2.3) (2026-08-04)
 
 
