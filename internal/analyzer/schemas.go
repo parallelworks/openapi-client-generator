@@ -816,10 +816,15 @@ func (a *Analyzer) goTypeForRef(ref string) string {
 }
 
 // goTypeForSchemaName returns the Go type name of a component schema, falling
-// back to its exported spelling when it has not been converted yet.
+// back to its exported spelling when the schema is not one of the components.
 func (a *Analyzer) goTypeForSchemaName(refName string) string {
 	if td, ok := a.typesBySchema[refName]; ok {
 		return td.Name
+	}
+	// Not converted yet: the name it was assigned, which a renamed schema needs
+	// for the reference to land on the right type.
+	if goName, ok := a.goNameBySchema[refName]; ok {
+		return goName
 	}
 	return naming.Exported(refName)
 }

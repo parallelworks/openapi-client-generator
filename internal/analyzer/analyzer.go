@@ -8,6 +8,7 @@ import (
 
 	naming "github.com/giraffesyo/openapi-go-naming"
 	"github.com/parallelworks/openapi-client-generator/internal/ir"
+	"github.com/parallelworks/openapi-client-generator/internal/templates"
 )
 
 // Analyzer walks a parsed OpenAPI 3.1 model and produces IR types.
@@ -22,15 +23,20 @@ type Analyzer struct {
 	synthesizedByKey map[string]*ir.TypeDef
 	// multipartBodies holds the schema names a multipart request body refers to.
 	multipartBodies map[string]bool
+	// goNameBySchema maps every component schema to its Go type name, filled in
+	// before any conversion so a reference to a schema that has not been converted
+	// yet still resolves to the name it will end up with.
+	goNameBySchema map[string]string
 }
 
 // New creates an Analyzer for the given high-level OpenAPI model.
 func New(model *v3high.Document) *Analyzer {
 	return &Analyzer{
 		model:            model,
-		namer:            naming.NewScope(),
+		namer:            naming.NewScope(templates.ReservedIdentifiers...),
 		typesBySchema:    make(map[string]*ir.TypeDef),
 		synthesizedByKey: make(map[string]*ir.TypeDef),
+		goNameBySchema:   make(map[string]string),
 	}
 }
 
@@ -112,7 +118,9 @@ func (a *Analyzer) analyzeComponentSchemas(pkg *ir.Package) error {
 		if schema == nil {
 			continue
 		}
-		pending = append(pending, pendingSchema{name, a.namer.Unique(naming.Exported(name)), schema})
+		goName := a.namer.Unique(naming.Exported(name))
+		a.goNameBySchema[name] = goName
+		pending = append(pending, pendingSchema{name, goName, schema})
 	}
 
 	for _, p := range pending {
