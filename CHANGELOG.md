@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.6](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.5...v0.2.6) (2026-08-05)
+
+
+### Bug Fixes
+
+* embedded schema's additionalProperties swallows the outer schema's declared fields ([#53](https://github.com/parallelworks/openapi-client-generator/issues/53)) ([034c2d1](https://github.com/parallelworks/openapi-client-generator/commit/034c2d19609e783a7af9420cb8061c3766c01538))
+* valid specs generate unusable params, bodies, and enum constants ([#49](https://github.com/parallelworks/openapi-client-generator/issues/49)) ([d4c29cc](https://github.com/parallelworks/openapi-client-generator/commit/d4c29cc34122581446197d7612ef438fd4709c80))
+
 ## [0.2.5](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.4...v0.2.5) (2026-08-05)
 
 
