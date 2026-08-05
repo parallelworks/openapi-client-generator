@@ -34,7 +34,7 @@ func deleteDeclaredProperties(obj map[string]json.RawMessage, declared []string)
 {{ end }}type {{ .Name }} struct {
 {{ range .Fields }}{{ $fDoc := fieldDocComment . }}{{ if $fDoc }}{{ indent $fDoc }}
 {{ end }}{{ if .Embedded }}	{{ .Type }}
-{{ else }}	{{ .Name }} {{ .Type }} `json:"{{ jsonTag . }}"`
+{{ else }}	{{ .Name }} {{ .Type }} `{{ fieldTag . }}`
 {{ end }}{{ end }}}
 {{ with catchAllField . }}
 // MarshalJSON implements json.Marshaler for {{ $typeName }}, inlining
@@ -57,7 +57,7 @@ func (t {{ $typeName }}) MarshalJSON() ([]byte, error) {
 		}
 		extra[key] = raw
 	}
-	deleteDeclaredProperties(extra, []string{ {{ range $i, $n := declaredJSONNames $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
+	deleteDeclaredProperties(extra, []string{ {{ range $i, $n := declaredJSONNames $ $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
 	if len(extra) == 0 {
 		return data, nil
 	}
@@ -89,17 +89,23 @@ func (t *{{ $typeName }}) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return err
 	}
-	deleteDeclaredProperties(obj, []string{ {{ range $i, $n := declaredJSONNames $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
+	deleteDeclaredProperties(obj, []string{ {{ range $i, $n := declaredJSONNames $ $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
 	if len(obj) == 0 {
 		return nil
 	}
 	t.{{ .Name }} = make({{ .Type }}, len(obj))
 	for key, raw := range obj {
 		var value {{ catchAllValueType . }}
+		// A property that is both undeclared and not of the type the schema gives
+		// additionalProperties is the least useful thing in the payload, so it is
+		// dropped rather than failing the decode of everything alongside it.
 		if err := json.Unmarshal(raw, &value); err != nil {
-			return fmt.Errorf("unmarshaling additional property %q: %w", key, err)
+			continue
 		}
 		t.{{ .Name }}[key] = value
+	}
+	if len(t.{{ .Name }}) == 0 {
+		t.{{ .Name }} = nil
 	}
 	return nil
 }
@@ -121,7 +127,7 @@ type {{ .Name }} struct {
 {{- if .Discriminator }}
 
 	unknownDiscriminator string
-	raw                  json.RawMessage
+	raw                  string
 {{- end }}
 }
 {{ if .Discriminator }}
@@ -140,14 +146,17 @@ func (u {{ .Name }}) UnknownDiscriminator() string {
 
 // Raw returns the original JSON of an unrecognized variant, or nil.
 func (u {{ .Name }}) Raw() json.RawMessage {
-	return u.raw
+	if u.raw == "" {
+		return nil
+	}
+	return json.RawMessage(u.raw)
 }
 {{ end }}
 // MarshalJSON implements json.Marshaler for {{ .Name }}.
 func (u {{ .Name }}) MarshalJSON() ([]byte, error) {
 {{- if .Discriminator }}
 	if u.IsUnknownVariant() {
-		return u.raw, nil
+		return []byte(u.raw), nil
 	}
 {{- end }}
 	return json.Marshal(u.Value)
@@ -185,22 +194,33 @@ func (u *{{ $typeName }}) UnmarshalJSON(data []byte) error {
 		// of the whole payload it happens to appear in.
 		*u = {{ $typeName }}{
 			unknownDiscriminator: disc.{{ discriminatorFieldName .Discriminator.PropertyName }},
-			raw:                  append(json.RawMessage(nil), data...),
+			raw:                  string(data),
 		}
 		return nil
 	}
 {{- else }}
 	var errors []error
-{{- range .UnionTypes }}
-{{- if ne .TypeName "any" }}
-	var val{{ .TypeName }} {{ .TypeName }}
-	if err := json.Unmarshal(data, &val{{ .TypeName }}); err == nil {
-		u.Value = val{{ .TypeName }}
+{{- range $i, $v := .UnionTypes }}
+{{- if ne $v.TypeName "any" }}
+	var variant{{ $i }} {{ $v.TypeName }}
+	if err := json.Unmarshal(data, &variant{{ $i }}); err == nil {
+		u.Value = variant{{ $i }}
 		return nil
 	} else {
 		errors = append(errors, err)
 	}
 {{- end }}
+{{- end }}
+{{- if hasUntypedVariant . }}
+	// A variant with no Go type of its own still covers payloads the spec says are
+	// valid, so they decode into any rather than failing as an unmatched variant.
+	var untyped any
+	if err := json.Unmarshal(data, &untyped); err == nil {
+		u.Value = untyped
+		return nil
+	} else {
+		errors = append(errors, err)
+	}
 {{- end }}
 	return fmt.Errorf("data did not match any variant of {{ $typeName }}: %v", errors)
 {{- end }}

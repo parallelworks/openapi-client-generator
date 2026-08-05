@@ -145,6 +145,45 @@ func TestMissingDiscriminatorIsAnError(t *testing.T) {
 	}
 }
 
+// A union must stay comparable: it is an ordinary field of the structs that hold
+// it, so storing the preserved raw payload in a slice would make every one of
+// those structs uncomparable too -- a compile error for consumers.
+func TestUnionIsComparable(t *testing.T) {
+	var a, b ShapeCollectionShapesValue
+	if a != b {
+		t.Error("zero unions should be equal")
+	}
+	if !map[ShapeCollectionShapesValue]bool{a: true}[b] {
+		t.Error("a union should be usable as a map key")
+	}
+}
+
+func TestUnknownVariantRawIsACopy(t *testing.T) {
+	payload := []byte("{\"shapeType\":\"hexagon\",\"sides\":6}")
+	var v ShapeCollectionShapesValue
+	if err := json.Unmarshal(payload, &v); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	raw := v.Raw()
+	if len(raw) == 0 {
+		t.Fatal("Raw() lost the unrecognized payload")
+	}
+	raw[0] = 'X'
+	if again := v.Raw(); again[0] == 'X' {
+		t.Error("Raw() aliases the union's own buffer")
+	}
+}
+
+func TestKnownVariantHasNoRaw(t *testing.T) {
+	var v ShapeCollectionShapesValue
+	if err := json.Unmarshal([]byte("{\"shapeType\":\"circle\",\"radius\":1}"), &v); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if v.Raw() != nil {
+		t.Errorf("Raw() = %s, want nil for a recognized variant", v.Raw())
+	}
+}
+
 func TestNullUnionDecodesToTheZeroValue(t *testing.T) {
 	var v ShapeCollectionShapesValue
 	if err := json.Unmarshal([]byte("null"), &v); err != nil {
@@ -166,4 +205,52 @@ func TestNullUnionDecodesToTheZeroValue(t *testing.T) {
 		t.Fatalf("go test on generated code failed: %v\n%s", err, string(output))
 	}
 	t.Logf("runtime dispatch test passed:\n%s", string(output))
+}
+
+const untypedVariantSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths: {}
+components:
+  schemas:
+    Mixed:
+      oneOf:
+        - { type: string }
+        - type: object
+          properties:
+            q: { type: string }
+`
+
+// TestE2E_UntypedUnionVariantStillDecodes covers a union member the analyzer
+// cannot name: it still covers payloads the spec calls valid, and rejecting them
+// would fail the whole response they arrive in.
+func TestE2E_UntypedUnionVariantStillDecodes(t *testing.T) {
+	files, _ := generateFromSpec(t, untypedVariantSpec, "mixedapi")
+	runGeneratedWireTest(t, files, "untypedvariant", `package mixedapi
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestUntypedVariantDecodes(t *testing.T) {
+	var m Mixed
+	if err := json.Unmarshal([]byte(`+"`"+`{"q":"x"}`+"`"+`), &m); err != nil {
+		t.Fatalf("a payload matching the inline object variant failed to decode: %v", err)
+	}
+	obj, ok := m.Value.(map[string]any)
+	if !ok || obj["q"] != "x" {
+		t.Errorf("Value = %#v, want the decoded object", m.Value)
+	}
+}
+
+func TestTypedVariantStillWins(t *testing.T) {
+	var m Mixed
+	if err := json.Unmarshal([]byte(`+"`"+`"plain"`+"`"+`), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m.Value != "plain" {
+		t.Errorf("Value = %#v, want the string variant", m.Value)
+	}
+}
+`)
 }

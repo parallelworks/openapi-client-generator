@@ -4,6 +4,7 @@ package {{ .Name }}
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -12,6 +13,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+{{- if hasNonJSONBody . }}
+	"bytes"
+	"encoding"
+	"io"
+	"mime/multipart"
+	"net/textproto"
+{{- end }}
 )
 
 // pathReplace substitutes a {param} placeholder in a URL path, encoding the value
@@ -44,7 +52,13 @@ func derefParam(value any) (reflect.Value, bool) {
 // isSlice reports whether rv is a multi-value slice; a []byte is a scalar
 // (formatScalar renders it as base64), not a list of bytes.
 func isSlice(rv reflect.Value) bool {
-	return rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() != reflect.Uint8
+	return rv.Kind() == reflect.Slice && !isByteSlice(rv)
+}
+
+// isByteSlice reports whether rv is a []byte, the Go type of an OpenAPI
+// format: byte or format: binary value.
+func isByteSlice(rv reflect.Value) bool {
+	return rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8
 }
 
 // isObject reports whether rv is a struct or map to serialize property-by-property;
@@ -71,7 +85,7 @@ func formatScalar(rv reflect.Value) string {
 	}
 	switch rv.Kind() {
 	case reflect.Slice:
-		if rv.Type().Elem().Kind() == reflect.Uint8 {
+		if isByteSlice(rv) {
 			return base64.StdEncoding.EncodeToString(rv.Bytes())
 		}
 	case reflect.Float32:
@@ -115,11 +129,18 @@ func sliceValues(rv reflect.Value) []string {
 	return out
 }
 
-// objectPairs returns an object's (property, value) pairs in a stable order:
-// struct fields in declaration order keyed by their json tag (an embedded field's
-// properties are flattened in), map keys sorted. A nil pointer property is skipped.
-func objectPairs(rv reflect.Value) [][2]string {
-	var pairs [][2]string
+// namedValue is one property of an object: its wire name and its value, with any
+// pointer already unwrapped.
+type namedValue struct {
+	name  string
+	value reflect.Value
+}
+
+// objectValues returns an object's properties in a stable order: struct fields in
+// declaration order keyed by their json tag (an embedded field's properties are
+// flattened in), map keys sorted. A nil pointer property is skipped.
+func objectValues(rv reflect.Value) []namedValue {
+	var values []namedValue
 	switch rv.Kind() {
 	case reflect.Struct:
 		t := rv.Type()
@@ -132,8 +153,10 @@ func objectPairs(rv reflect.Value) [][2]string {
 			if !ok {
 				continue
 			}
-			if f.Anonymous && isObject(fv) {
-				pairs = append(pairs, objectPairs(fv)...)
+			// An embedded struct and the additionalProperties catch-all both hold
+			// properties of this object, not properties of their own.
+			if (f.Anonymous || f.Tag.Get("openapi") == "additionalProperties") && isObject(fv) {
+				values = append(values, objectValues(fv)...)
 				continue
 			}
 			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
@@ -143,7 +166,7 @@ func objectPairs(rv reflect.Value) [][2]string {
 			if name == "-" {
 				continue
 			}
-			pairs = append(pairs, [2]string{name, formatValue(fv)})
+			values = append(values, namedValue{name, fv})
 		}
 	case reflect.Map:
 		keys := make([]string, 0, rv.Len())
@@ -156,9 +179,22 @@ func objectPairs(rv reflect.Value) [][2]string {
 		sort.Strings(keys)
 		for _, k := range keys {
 			if fv, ok := derefParam(byKey[k].Interface()); ok {
-				pairs = append(pairs, [2]string{k, formatValue(fv)})
+				values = append(values, namedValue{k, fv})
 			}
 		}
+	}
+	return values
+}
+
+// objectPairs renders an object's properties as flat (property, value) pairs.
+func objectPairs(rv reflect.Value) [][2]string {
+	values := objectValues(rv)
+	if len(values) == 0 {
+		return nil
+	}
+	pairs := make([][2]string, 0, len(values))
+	for _, v := range values {
+		pairs = append(pairs, [2]string{v.name, formatValue(v.value)})
 	}
 	return pairs
 }
@@ -337,6 +373,241 @@ func setHeader(headers http.Header, name string, explode bool, value any) {
 	}
 	headers.Set(name, encodeSimple(rv, explode))
 }
+
+// encodeRequestBody renders a request body under the media type its operation
+// declares, returning the payload and the Content-Type to send it with.
+func encodeRequestBody(body any, contentType string) ([]byte, string, error) {
+	if contentType == "" {
+		contentType = "application/json"
+	}
+{{- if hasNonJSONBody . }}
+	if !strings.Contains(contentType, "json") {
+		return encodeNonJSONBody(body, contentType)
+	}
+{{- end }}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, "", fmt.Errorf("encoding request body: %w", err)
+	}
+	return data, contentType, nil
+}
+{{- if hasNonJSONBody . }}
+
+// encodeNonJSONBody renders a body whose media type is not JSON.
+func encodeNonJSONBody(body any, contentType string) ([]byte, string, error) {
+	switch {
+	case strings.HasPrefix(contentType, "multipart/"):
+		return encodeMultipart(body, contentType)
+	case strings.HasPrefix(contentType, "application/x-www-form-urlencoded"):
+		return encodeFormValues(body, contentType)
+	}
+
+	rv, ok := derefParam(body)
+	if !ok {
+		return nil, contentType, nil
+	}
+	if m, ok := rv.Interface().(encoding.TextMarshaler); ok {
+		data, err := m.MarshalText()
+		if err != nil {
+			return nil, "", fmt.Errorf("encoding %s body: %w", contentType, err)
+		}
+		return data, contentType, nil
+	}
+	switch {
+	case isByteSlice(rv):
+		return rv.Bytes(), contentType, nil
+	case !isObject(rv) && !isSlice(rv):
+		return []byte(formatScalar(rv)), contentType, nil
+	}
+	// Marshaling the value as JSON here would send JSON under a Content-Type that
+	// promises something else; the schema alone does not say how to encode it.
+	return nil, "", fmt.Errorf("encoding %s body: no encoder for this media type, pass a []byte or string body", contentType)
+}
+
+// encodeFormValues renders a body as url-encoded form data.
+func encodeFormValues(body any, contentType string) ([]byte, string, error) {
+	rv, ok := derefParam(body)
+	if !ok || !isObject(rv) {
+		return nil, "", fmt.Errorf("encoding %s body: want an object, got %T", contentType, body)
+	}
+	values := url.Values{}
+	for _, v := range objectValues(rv) {
+		if err := addFormValue(values, v.name, v.value); err != nil {
+			return nil, "", fmt.Errorf("encoding form field %q: %w", v.name, err)
+		}
+	}
+	// Encode (unlike encodeQuery) spells a space '+', which is what
+	// x-www-form-urlencoded defines; the RFC 3986 rewrite applies to query strings.
+	return []byte(values.Encode()), contentType, nil
+}
+
+// addFormValue adds one property of a url-encoded body: an array one pair per
+// element, an object as JSON, everything else as a scalar.
+func addFormValue(values url.Values, name string, rv reflect.Value) error {
+	if rv.Kind() == reflect.Interface {
+		if rv.IsNil() {
+			return nil
+		}
+		rv = rv.Elem()
+	}
+	switch {
+	case isSlice(rv):
+		for i := 0; i < rv.Len(); i++ {
+			if err := addFormValue(values, name, rv.Index(i)); err != nil {
+				return err
+			}
+		}
+	case isObject(rv):
+		data, err := json.Marshal(rv.Interface())
+		if err != nil {
+			return err
+		}
+		values.Add(name, string(data))
+	default:
+		values.Add(name, formatScalar(rv))
+	}
+	return nil
+}
+
+// FormFile is one file in a multipart request body. Filename defaults to the
+// property name and ContentType to application/octet-stream when left empty.
+type FormFile struct {
+	Filename    string
+	ContentType string
+	Content     []byte
+}
+
+// MarshalJSON encodes a FormFile the way the []byte it stands in for would be,
+// so a schema shared between a multipart body and a JSON one still round-trips.
+func (f FormFile) MarshalJSON() ([]byte, error) {
+	return json.Marshal(f.Content)
+}
+
+// UnmarshalJSON decodes a base64 JSON string into the file's content.
+func (f *FormFile) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, &f.Content)
+}
+
+// encodeMultipart renders a body as multipart form data. A FormFile property
+// (OpenAPI format: binary) becomes a file part; every other property becomes a
+// text part, an array one part per element.
+func encodeMultipart(body any, contentType string) ([]byte, string, error) {
+	rv, ok := derefParam(body)
+	if !ok || !isObject(rv) {
+		return nil, "", fmt.Errorf("encoding %s body: want an object, got %T", contentType, body)
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for _, v := range objectValues(rv) {
+		if err := writeMultipartField(w, v.name, v.value); err != nil {
+			return nil, "", fmt.Errorf("encoding multipart field %q: %w", v.name, err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		return nil, "", fmt.Errorf("encoding multipart body: %w", err)
+	}
+	return buf.Bytes(), contentType + "; boundary=" + w.Boundary(), nil
+}
+
+// writeMultipartField writes one property of a multipart body.
+func writeMultipartField(w *multipart.Writer, name string, rv reflect.Value) error {
+	if rv.Kind() == reflect.Interface {
+		if rv.IsNil() {
+			return nil
+		}
+		rv = rv.Elem()
+	}
+
+	// A FormFile is a struct, so it has to be recognized before isObject would
+	// send it through as a JSON part.
+	if file, ok := rv.Interface().(FormFile); ok {
+		return writeFilePart(w, name, file)
+	}
+
+	switch {
+	case isByteSlice(rv):
+		// Files arrive as a FormFile, so a byte slice here is OpenAPI's
+		// format: byte — base64 text, not an upload. A nil one is unset.
+		if rv.IsNil() {
+			return nil
+		}
+		return w.WriteField(name, formatScalar(rv))
+	case isSlice(rv):
+		for i := 0; i < rv.Len(); i++ {
+			if err := writeMultipartField(w, name, rv.Index(i)); err != nil {
+				return err
+			}
+		}
+		return nil
+	case isObject(rv):
+		// OpenAPI encodes an object-valued part as JSON unless the spec says otherwise.
+		data, err := json.Marshal(rv.Interface())
+		if err != nil {
+			return err
+		}
+		part, err := createPart(w, name, "", "application/json")
+		if err != nil {
+			return err
+		}
+		_, err = part.Write(data)
+		return err
+	default:
+		part, err := createPart(w, name, "", "")
+		if err != nil {
+			return err
+		}
+		_, err = io.WriteString(part, formatScalar(rv))
+		return err
+	}
+}
+
+// writeFilePart writes a file part; a server that keys on Content-Disposition's
+// filename will not treat a part without one as an upload at all.
+func writeFilePart(w *multipart.Writer, name string, file FormFile) error {
+	filename := file.Filename
+	if filename == "" {
+		filename = name
+	}
+	contentType := file.ContentType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	part, err := createPart(w, name, filename, contentType)
+	if err != nil {
+		return err
+	}
+	_, err = part.Write(file.Content)
+	return err
+}
+
+// createPart starts a multipart part with the headers that apply to it.
+func createPart(w *multipart.Writer, name, filename, contentType string) (io.Writer, error) {
+	disposition := `form-data; name="` + escapePartName(name) + `"`
+	if filename != "" {
+		disposition += `; filename="` + escapePartName(filename) + `"`
+	}
+	header := make(textproto.MIMEHeader, 2)
+	header.Set("Content-Disposition", disposition)
+	if contentType != "" {
+		header.Set("Content-Type", stripHeaderBreaks.Replace(contentType))
+	}
+	return w.CreatePart(header)
+}
+
+// stripHeaderBreaks drops the line breaks that would otherwise let a value chosen
+// at runtime — a map key, a caller's content type — inject headers of its own;
+// multipart.Writer writes part headers verbatim.
+var stripHeaderBreaks = strings.NewReplacer("\r", "", "\n", "")
+
+// partNameEscaper additionally quotes the characters that would end a
+// Content-Disposition parameter early.
+var partNameEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\r", "", "\n", "")
+
+func escapePartName(name string) string {
+	return partNameEscaper.Replace(name)
+}
+{{- end }}
 
 // addCookieHeader appends a cookie to the Cookie header, skipping nil optional
 // values. A Cookie header is a single name=value, so arrays and objects are

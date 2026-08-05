@@ -8,6 +8,7 @@ import (
 
 	naming "github.com/giraffesyo/openapi-go-naming"
 	"github.com/parallelworks/openapi-client-generator/internal/ir"
+	"github.com/parallelworks/openapi-client-generator/internal/templates"
 )
 
 // Analyzer walks a parsed OpenAPI 3.1 model and produces IR types.
@@ -20,15 +21,22 @@ type Analyzer struct {
 	// deduplicated on their variant set and discriminator.
 	synthesized      []*ir.TypeDef
 	synthesizedByKey map[string]*ir.TypeDef
+	// multipartBodies holds the schema names a multipart request body refers to.
+	multipartBodies map[string]bool
+	// goNameBySchema maps every component schema to its Go type name, filled in
+	// before any conversion so a reference to a schema that has not been converted
+	// yet still resolves to the name it will end up with.
+	goNameBySchema map[string]string
 }
 
 // New creates an Analyzer for the given high-level OpenAPI model.
 func New(model *v3high.Document) *Analyzer {
 	return &Analyzer{
 		model:            model,
-		namer:            naming.NewScope(),
+		namer:            naming.NewScope(templates.ReservedIdentifiers...),
 		typesBySchema:    make(map[string]*ir.TypeDef),
 		synthesizedByKey: make(map[string]*ir.TypeDef),
+		goNameBySchema:   make(map[string]string),
 	}
 }
 
@@ -54,6 +62,15 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 		}
 	}
 
+	// A multipart body's binary properties are generated as file parts rather
+	// than as byte slices, which has to be settled before the schemas holding
+	// them are converted.
+	a.multipartBodies = a.collectMultipartBodySchemas()
+
+	// Schema names are assigned next, and must avoid the identifiers the templates
+	// derive from operations and error bodies.
+	a.reserveDerivedNames()
+
 	// Analyze component schemas.
 	if err := a.analyzeComponentSchemas(pkg); err != nil {
 		return nil, err
@@ -71,6 +88,12 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 
 	// Append union types synthesized for inline oneOf/anyOf schemas.
 	pkg.Types = append(pkg.Types, a.synthesized...)
+
+	// A spec is free to define a type in terms of itself; Go aliases are not, and
+	// a struct may only do it through an indirection.
+	breakAliasCycles(pkg.Types)
+	breakStructCycles(pkg.Types)
+	dropShadowedCatchAlls(pkg.Types)
 
 	// Detect paginated operations.
 	a.detectPagination(pkg)
@@ -102,7 +125,9 @@ func (a *Analyzer) analyzeComponentSchemas(pkg *ir.Package) error {
 		if schema == nil {
 			continue
 		}
-		pending = append(pending, pendingSchema{name, a.namer.Unique(naming.Exported(name)), schema})
+		goName := a.namer.Unique(naming.Exported(name))
+		a.goNameBySchema[name] = goName
+		pending = append(pending, pendingSchema{name, goName, schema})
 	}
 
 	for _, p := range pending {

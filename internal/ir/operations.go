@@ -41,7 +41,6 @@ type RequestBodyDef struct {
 	Description string
 	ContentType string // Primary content type (e.g., "application/json")
 	TypeName    string // Go type for the body
-	IsMultipart bool
 }
 
 // ResponseDef describes one response.

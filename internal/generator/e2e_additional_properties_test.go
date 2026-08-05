@@ -38,6 +38,26 @@ components:
       properties:
         only: { type: string }
       additionalProperties: false
+    Base:
+      type: object
+      properties:
+        id: { type: string }
+    Composed:
+      allOf:
+        - $ref: "#/components/schemas/Base"
+        - type: object
+          properties:
+            name: { type: string }
+      additionalProperties: true
+    NullableBase:
+      anyOf: [{ $ref: "#/components/schemas/Base" }, { type: "null" }]
+    ComposedThroughAlias:
+      allOf:
+        - $ref: "#/components/schemas/NullableBase"
+        - type: object
+          properties:
+            note: { type: string }
+      additionalProperties: true
 `
 
 const additionalPropertiesRuntimeTest = `package petsapi
@@ -158,6 +178,82 @@ func TestEmptyAdditionalPropertiesOmitsNothingExtra(t *testing.T) {
 	}
 	if string(out) != ` + "`" + `{"name":"rex"}` + "`" + ` {
 		t.Errorf("marshal = %s, want {\"name\":\"rex\"}", out)
+	}
+}
+
+// A composed schema collects undeclared properties just like a plain one, and
+// the properties it inherits from the schema it embeds are not re-collected.
+func TestComposedSchemaKeepsUnknownKeys(t *testing.T) {
+	var c Composed
+	if err := json.Unmarshal([]byte(` + "`" + `{"id":"x","name":"n","extra":"kept"}` + "`" + `), &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if c.ID == nil || *c.ID != "x" {
+		t.Errorf("inherited property lost: %v", c.ID)
+	}
+	if c.Name == nil || *c.Name != "n" {
+		t.Errorf("declared property lost: %v", c.Name)
+	}
+	if got := c.AdditionalProperties["extra"]; got != "kept" {
+		t.Errorf("AdditionalProperties[extra] = %v, want kept", got)
+	}
+	if _, ok := c.AdditionalProperties["id"]; ok {
+		t.Error("a property inherited from the embedded schema landed in the catch-all")
+	}
+
+	out, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if n := strings.Count(string(out), ` + "`" + `"id"` + "`" + `); n != 1 {
+		t.Errorf("id emitted %d times: %s", n, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("re-unmarshal: %v", err)
+	}
+	for key, want := range map[string]any{"id": "x", "name": "n", "extra": "kept"} {
+		if got[key] != want {
+			t.Errorf("round trip[%s] = %v, want %v", key, got[key], want)
+		}
+	}
+}
+
+// One undeclared property of the wrong type must not cost the caller the whole
+// response; the declared fields are what consumers depend on.
+func TestOffTypeExtraDoesNotFailTheDecode(t *testing.T) {
+	var l Labels
+	if err := json.Unmarshal([]byte(` + "`" + `{"owner":"me","count":3,"env":"prod"}` + "`" + `), &l); err != nil {
+		t.Fatalf("one off-type extra failed the whole decode: %v", err)
+	}
+	if l.Owner == nil || *l.Owner != "me" {
+		t.Errorf("Owner = %v, want me", l.Owner)
+	}
+	if l.AdditionalProperties["env"] != "prod" {
+		t.Errorf("AdditionalProperties[env] = %q, want prod", l.AdditionalProperties["env"])
+	}
+	if _, ok := l.AdditionalProperties["count"]; ok {
+		t.Error("a property that does not match the declared value type was kept anyway")
+	}
+}
+
+// The embedded schema is reached through an alias, so the catch-all still has to
+// recognize the properties that alias promotes as already declared.
+func TestPropertiesInheritedThroughAnAliasAreNotRecollected(t *testing.T) {
+	var c ComposedThroughAlias
+	if err := json.Unmarshal([]byte(` + "`" + `{"id":"x","note":"n","extra":"kept"}` + "`" + `), &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := c.AdditionalProperties["id"]; ok {
+		t.Error("a property promoted through an aliased embed landed in the catch-all")
+	}
+
+	out, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if n := strings.Count(string(out), ` + "`" + `"id"` + "`" + `); n != 1 {
+		t.Errorf("id emitted %d times: %s", n, out)
 	}
 }
 `

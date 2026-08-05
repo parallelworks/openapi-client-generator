@@ -296,11 +296,13 @@ func TestGenerate_UnionType(t *testing.T) {
 	if !strings.Contains(content, "func (u *PetOrError) UnmarshalJSON(data []byte)") {
 		t.Error("output missing UnmarshalJSON method")
 	}
-	// Without discriminator, should try each variant.
-	if !strings.Contains(content, "valPet") {
+	// Without discriminator, should try each variant. The locals are numbered
+	// rather than named after the type, so a variant whose Go type is not an
+	// identifier (say []string) still declares a legal one.
+	if !strings.Contains(content, "var variant0 Pet") {
 		t.Error("output missing try-each-variant logic for Pet")
 	}
-	if !strings.Contains(content, "valError") {
+	if !strings.Contains(content, "var variant1 Error") {
 		t.Error("output missing try-each-variant logic for Error")
 	}
 

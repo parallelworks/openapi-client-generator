@@ -19,6 +19,7 @@ func FuncMap() template.FuncMap {
 		"paramDocComment":         paramDocComment,
 		"indent":                  indent,
 		"jsonTag":                 jsonTag,
+		"fieldTag":                fieldTag,
 		"hasOperations":           hasOperations,
 		"successType":             successType,
 		"hasBody":                 hasBody,
@@ -27,6 +28,7 @@ func FuncMap() template.FuncMap {
 		"hasRequiredCookieParams": hasRequiredCookieParams,
 		"paramType":               paramType,
 		"hasUnions":               hasUnions,
+		"hasUntypedVariant":       hasUntypedVariant,
 		"catchAllField":           catchAllField,
 		"catchAllValueType":       catchAllValueType,
 		"declaredJSONNames":       declaredJSONNames,
@@ -40,6 +42,8 @@ func FuncMap() template.FuncMap {
 		"errorMessageField":       errorMessageField,
 		"errorType":               errorType,
 		"successContentType":      successContentType,
+		"requestContentType":      requestContentType,
+		"hasNonJSONBody":          hasNonJSONBody,
 	}
 }
 
@@ -177,6 +181,17 @@ func indent(s string) string {
 	return strings.Join(lines, "\n")
 }
 
+// fieldTag returns a struct field's full tag. The catch-all carries a marker
+// because its json tag is "-": the body encoders have no other way to tell it
+// apart from a field the schema genuinely excludes.
+func fieldTag(f *ir.Field) string {
+	tag := `json:"` + jsonTag(f) + `"`
+	if f.CatchAll {
+		tag += ` openapi:"additionalProperties"`
+	}
+	return tag
+}
+
 // jsonTag returns the JSON struct tag value for a field.
 // It returns "fieldName,omitempty" for optional fields and "fieldName" for required ones.
 func jsonTag(f *ir.Field) string {
@@ -208,14 +223,35 @@ func catchAllValueType(f *ir.Field) string {
 	return strings.TrimPrefix(f.Type, "map[string]")
 }
 
-func declaredJSONNames(td *ir.TypeDef) []string {
+// declaredJSONNames returns the wire names a struct already consumes into
+// fields, an embedded type's included: those are promoted onto the struct, so a
+// catch-all that re-collected them would emit each one twice.
+func declaredJSONNames(pkg *ir.Package, td *ir.TypeDef) []string {
+	byName := ir.TypesByName(pkg.Types)
+
 	var names []string
-	for _, f := range td.Fields {
-		if f.CatchAll || f.Embedded || f.JSONName == "" || f.JSONName == "-" {
-			continue
+	visited := make(map[string]bool)
+
+	var walk func(td *ir.TypeDef)
+	walk = func(td *ir.TypeDef) {
+		if td == nil || visited[td.Name] {
+			return
 		}
-		names = append(names, f.JSONName)
+		visited[td.Name] = true
+		for _, f := range td.Fields {
+			switch {
+			case f.CatchAll:
+			case f.Embedded:
+				// The type may be written as a pointer where an indirection broke a
+				// reference cycle, and may be an alias standing for the struct.
+				walk(ir.StructNamed(byName, strings.TrimPrefix(f.Type, "*")))
+			case f.JSONName == "" || f.JSONName == "-":
+			default:
+				names = append(names, f.JSONName)
+			}
+		}
 	}
+	walk(td)
 	return names
 }
 
@@ -276,6 +312,12 @@ func hasUnions(types []*ir.TypeDef) bool {
 		}
 	}
 	return false
+}
+
+// hasUntypedVariant reports whether a union has a variant no Go type could be
+// derived for, whose payloads nothing but an any decode accepts.
+func hasUntypedVariant(td *ir.TypeDef) bool {
+	return slices.ContainsFunc(td.UnionTypes, func(v *ir.UnionVariant) bool { return v.TypeName == "any" })
 }
 
 // discriminatorFieldName converts a JSON property name to a Go field name
@@ -365,4 +407,23 @@ func successContentType(op *ir.OperationDef) string {
 		return "application/json"
 	}
 	return op.SuccessResponse.ContentType
+}
+
+// requestContentType returns the media type an operation sends its request body
+// as, or "" when it has no body.
+func requestContentType(op *ir.OperationDef) string {
+	if op.RequestBody == nil {
+		return ""
+	}
+	return op.RequestBody.ContentType
+}
+
+// hasNonJSONBody reports whether any operation sends a request body in a media
+// type other than JSON, which is what pulls the extra body encoders into the
+// generated helpers.
+func hasNonJSONBody(pkg *ir.Package) bool {
+	return slices.ContainsFunc(pkg.Operations, func(op *ir.OperationDef) bool {
+		ct := requestContentType(op)
+		return ct != "" && !strings.Contains(ct, "json")
+	})
 }

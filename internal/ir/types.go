@@ -1,5 +1,48 @@
 package ir
 
+import "strings"
+
+// TypesByName indexes type definitions by the Go name they declare.
+func TypesByName(types []*TypeDef) map[string]*TypeDef {
+	byName := make(map[string]*TypeDef, len(types))
+	for _, td := range types {
+		if td != nil {
+			byName[td.Name] = td
+		}
+	}
+	return byName
+}
+
+// NamedType returns goType when it is a bare type name rather than a builtin or a
+// composite with no single referent.
+func NamedType(goType string) string {
+	if goType == "" || goType == "any" || strings.ContainsAny(goType, ".[]*{} ") {
+		return ""
+	}
+	return goType
+}
+
+// StructNamed returns the struct goType ultimately denotes, following the aliases
+// that may stand between the two. It returns nil for anything that does not end at
+// a generated struct.
+func StructNamed(byName map[string]*TypeDef, goType string) *TypeDef {
+	for range len(byName) + 1 {
+		td := byName[NamedType(goType)]
+		if td == nil {
+			return nil
+		}
+		switch td.Kind {
+		case TypeKindStruct:
+			return td
+		case TypeKindAlias:
+			goType = td.GoType
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
 // TypeKind represents the kind of Go type to generate.
 type TypeKind int
 
