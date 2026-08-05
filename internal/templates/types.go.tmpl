@@ -7,8 +7,27 @@ import (
 	"encoding/json"
 	"fmt"
 {{- end }}
+{{- if hasCatchAllTypes .Types }}
+	"strings"
+{{- end }}
 	"time"
 )
+{{- if hasCatchAllTypes .Types }}
+
+// deleteDeclaredProperties drops the keys encoding/json already consumed into
+// struct fields. The match is case-insensitive because that is the fallback
+// encoding/json itself uses, so "Name" must not also land in the catch-all map.
+func deleteDeclaredProperties(obj map[string]json.RawMessage, declared []string) {
+	for key := range obj {
+		for _, name := range declared {
+			if strings.EqualFold(key, name) {
+				delete(obj, key)
+				break
+			}
+		}
+	}
+}
+{{- end }}
 
 {{ range .Types }}
 {{ $typeDoc := typeDocComment . }}{{ if eq .Kind 0 }}{{ $typeName := .Name }}{{ $td := . }}{{ if $typeDoc }}{{ $typeDoc }}
@@ -30,45 +49,47 @@ func (t {{ $typeName }}) MarshalJSON() ([]byte, error) {
 		return data, nil
 	}
 
-	obj := make(map[string]json.RawMessage, len(t.{{ .Name }}))
+	extra := make(map[string]json.RawMessage, len(t.{{ .Name }}))
 	for key, value := range t.{{ .Name }} {
 		raw, err := json.Marshal(value)
 		if err != nil {
 			return nil, fmt.Errorf("marshaling additional property %q: %w", key, err)
 		}
-		obj[key] = raw
+		extra[key] = raw
 	}
-	for _, name := range []string{ {{ range $i, $n := declaredJSONNames $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} } {
-		delete(obj, name)
+	deleteDeclaredProperties(extra, []string{ {{ range $i, $n := declaredJSONNames $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
+	if len(extra) == 0 {
+		return data, nil
 	}
-
-	var declared map[string]json.RawMessage
-	if err := json.Unmarshal(data, &declared); err != nil {
+	encoded, err := json.Marshal(extra)
+	if err != nil {
 		return nil, err
 	}
-	for key, raw := range declared {
-		obj[key] = raw
+
+	// Splice the two objects together so the declared properties keep their
+	// struct field order instead of being re-sorted through a map.
+	merged := make([]byte, 0, len(data)+len(encoded))
+	merged = append(merged, data[:len(data)-1]...)
+	if len(data) > 2 {
+		merged = append(merged, ',')
 	}
-	return json.Marshal(obj)
+	return append(merged, encoded[1:]...), nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler for {{ $typeName }}, collecting
 // properties the schema does not declare into {{ .Name }}.
 func (t *{{ $typeName }}) UnmarshalJSON(data []byte) error {
 	type shadow {{ $typeName }}
-	var s shadow
-	if err := json.Unmarshal(data, &s); err != nil {
+	t.{{ .Name }} = nil
+	if err := json.Unmarshal(data, (*shadow)(t)); err != nil {
 		return err
 	}
-	*t = {{ $typeName }}(s)
 
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return err
 	}
-	for _, name := range []string{ {{ range $i, $n := declaredJSONNames $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} } {
-		delete(obj, name)
-	}
+	deleteDeclaredProperties(obj, []string{ {{ range $i, $n := declaredJSONNames $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
 	if len(obj) == 0 {
 		return nil
 	}
@@ -134,6 +155,9 @@ func (u {{ .Name }}) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements json.Unmarshaler for {{ .Name }}.
 func (u *{{ $typeName }}) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		return nil
+	}
 {{- if .Discriminator }}
 	var disc struct {
 		{{ discriminatorFieldName .Discriminator.PropertyName }} string `json:"{{ .Discriminator.PropertyName }}"`
@@ -150,6 +174,10 @@ func (u *{{ $typeName }}) UnmarshalJSON(data []byte) error {
 		}
 		*u = {{ $typeName }}{Value: v}
 		return nil
+{{- end }}
+{{- if not (index .Discriminator.Mapping "") }}
+	case "":
+		return fmt.Errorf("unmarshaling {{ $typeName }}: missing {{ .Discriminator.PropertyName }} discriminator")
 {{- end }}
 	default:
 		// Adding a variant to a oneOf is meant to be a backward-compatible change,

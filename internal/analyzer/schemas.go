@@ -301,6 +301,25 @@ func (a *Analyzer) convertUnion(goName string, schema *highbase.Schema, variants
 				discMapping[v] = k
 			}
 		}
+		// Without an explicit mapping the spec says the discriminator value is the
+		// variant's schema name; deriving it keeps the decoder from treating every
+		// payload as an unknown variant.
+		if len(td.Discriminator.Mapping) == 0 {
+			discMapping = make(map[string]string)
+			for _, proxy := range variants {
+				ref := proxy.GetReference()
+				refName := refToSchemaName(ref)
+				if refName == "" {
+					continue
+				}
+				goTypeName := naming.Exported(refName)
+				if existing, ok := a.typesBySchema[refName]; ok {
+					goTypeName = existing.Name
+				}
+				td.Discriminator.Mapping[refName] = goTypeName
+				discMapping[ref] = refName
+			}
+		}
 	}
 
 	for _, proxy := range variants {
@@ -337,7 +356,7 @@ func (a *Analyzer) convertUnion(goName string, schema *highbase.Schema, variants
 func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullable bool) (*ir.TypeDef, error) {
 	// If no defined properties and additionalProperties is set, generate a map alias.
 	hasProperties := schema.Properties != nil && schema.Properties.Len() > 0
-	if !hasProperties && schema.AdditionalProperties != nil {
+	if !hasProperties && allowsAdditionalProperties(schema) {
 		return a.convertAdditionalPropertiesMap(goName, schema, nullable)
 	}
 
@@ -393,10 +412,10 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 	// If the object has both properties and additionalProperties, add an extra field.
 	// The generator gives such structs MarshalJSON/UnmarshalJSON so the map is
 	// inlined into the object rather than nested under a key of its own.
-	if schema.AdditionalProperties != nil {
+	if allowsAdditionalProperties(schema) {
 		mapValueType := a.resolveAdditionalPropertiesType(schema, goName)
 		td.Fields = append(td.Fields, &ir.Field{
-			Name:        "AdditionalProperties",
+			Name:        catchAllFieldName(td.Fields),
 			JSONName:    "-",
 			Type:        "map[string]" + mapValueType,
 			Description: "Properties not defined by the schema.",
@@ -405,6 +424,30 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 	}
 
 	return td, nil
+}
+
+// allowsAdditionalProperties reports whether the schema permits undeclared
+// properties. `additionalProperties: false` forbids them, so no catch-all is
+// generated for it.
+func allowsAdditionalProperties(schema *highbase.Schema) bool {
+	ap := schema.AdditionalProperties
+	if ap == nil {
+		return false
+	}
+	return !(ap.IsB() && !ap.B)
+}
+
+// catchAllFieldName picks a Go name for the synthetic additionalProperties field
+// that no declared property has already taken.
+func catchAllFieldName(fields []*ir.Field) string {
+	name := "AdditionalProperties"
+	taken := func(candidate string) bool {
+		return slices.ContainsFunc(fields, func(f *ir.Field) bool { return f.Name == candidate })
+	}
+	for i := 2; taken(name); i++ {
+		name = "AdditionalProperties" + strconv.Itoa(i)
+	}
+	return name
 }
 
 // convertAdditionalPropertiesMap creates a map alias when an object has
@@ -507,7 +550,7 @@ func (a *Analyzer) resolveGoType(schema *highbase.Schema, nameHint string) strin
 	case "object":
 		// Inline objects without properties -> a map of the additionalProperties type.
 		if schema.Properties == nil || schema.Properties.Len() == 0 {
-			if schema.AdditionalProperties != nil {
+			if allowsAdditionalProperties(schema) {
 				return "map[string]" + a.resolveAdditionalPropertiesType(schema, nameHint)
 			}
 			return "map[string]any"

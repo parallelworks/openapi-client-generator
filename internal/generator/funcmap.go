@@ -192,7 +192,6 @@ func jsonTag(f *ir.Field) string {
 	return tag
 }
 
-// catchAllField returns the synthetic additionalProperties field of a struct, if any.
 func catchAllField(td *ir.TypeDef) *ir.Field {
 	if td.Kind != ir.TypeKindStruct {
 		return nil
@@ -205,13 +204,10 @@ func catchAllField(td *ir.TypeDef) *ir.Field {
 	return nil
 }
 
-// catchAllValueType returns the map value type of a catch-all field, e.g. "any"
-// for a map[string]any.
 func catchAllValueType(f *ir.Field) string {
 	return strings.TrimPrefix(f.Type, "map[string]")
 }
 
-// declaredJSONNames returns the wire names of a struct's non-catch-all fields.
 func declaredJSONNames(td *ir.TypeDef) []string {
 	var names []string
 	for _, f := range td.Fields {
@@ -223,7 +219,6 @@ func declaredJSONNames(td *ir.TypeDef) []string {
 	return names
 }
 
-// hasCatchAllTypes returns true if any type needs the additionalProperties marshalers.
 func hasCatchAllTypes(types []*ir.TypeDef) bool {
 	return slices.ContainsFunc(types, func(td *ir.TypeDef) bool {
 		return catchAllField(td) != nil

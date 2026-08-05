@@ -152,8 +152,10 @@ for _, shape := range shapes {
 }
 ```
 
-A union *without* a discriminator still fails when no variant matches, since there
-is nothing to identify the payload by.
+A payload that carries no discriminator property at all is still an error — there
+is nothing to identify it by — as is a union *without* a discriminator when no
+variant matches. When the schema declares a `discriminator` but no `mapping`, the
+variant's schema name is used as the discriminator value, per the OpenAPI spec.
 
 ## License
 
