@@ -115,6 +115,25 @@ components:
         - type: object
           properties:
             title: { type: string }
+    StrictChild:
+      allOf:
+        - $ref: "#/components/schemas/Parent"
+        - type: object
+          properties:
+            name: { type: string }
+      additionalProperties:
+        type: string
+    Node:
+      allOf:
+        - $ref: "#/components/schemas/NodeBase"
+        - type: object
+          properties:
+            label: { type: string }
+      additionalProperties: true
+    NodeBase:
+      allOf:
+        - $ref: "#/components/schemas/Node"
+      additionalProperties: true
 `
 
 const additionalPropertiesRuntimeTest = `package petsapi
@@ -294,9 +313,9 @@ func TestOffTypeExtraDoesNotFailTheDecode(t *testing.T) {
 	}
 }
 
-// When the embedded schema has additionalProperties of its own, its promoted
-// unmarshaler used to run for the composed type and sweep the composed type's
-// declared fields into the embedded catch-all.
+// An embedded schema with additionalProperties of its own must not let its
+// promoted unmarshaler sweep the composed type's declared fields into the
+// embedded catch-all.
 func TestEmbeddedCatchAllDoesNotSwallowDeclaredFields(t *testing.T) {
 	var c Child
 	if err := json.Unmarshal([]byte(` + "`" + `{"id":"x","name":"n","extra":"e"}` + "`" + `), &c); err != nil {
@@ -428,8 +447,8 @@ func TestTwoEmbeddedCatchAllParents(t *testing.T) {
 	}
 }
 
-// A composed type embedding a union used to promote the union's marshaler,
-// which emitted only the union value and dropped the composed type's fields.
+// A composed type embedding a union keeps its own fields: promotion would let
+// the union's marshaler emit only the union value.
 func TestEmbeddedUnionObjectVariant(t *testing.T) {
 	var v Tagged
 	if err := json.Unmarshal([]byte(` + "`" + `{"radius":1.5,"label":"L","extra":"e"}` + "`" + `), &v); err != nil {
@@ -444,6 +463,9 @@ func TestEmbeddedUnionObjectVariant(t *testing.T) {
 	}
 	if circle.Radius == nil || *circle.Radius != 1.5 {
 		t.Errorf("Radius = %v, want 1.5", circle.Radius)
+	}
+	if _, ok := v.AdditionalProperties["radius"]; ok {
+		t.Errorf("union variant property leaked into AdditionalProperties: %v", v.AdditionalProperties)
 	}
 
 	out, err := json.Marshal(v)
@@ -463,6 +485,20 @@ func TestEmbeddedUnionObjectVariant(t *testing.T) {
 		if got[k] != want {
 			t.Errorf("round trip[%s] = %v, want %v", k, got[k], want)
 		}
+	}
+
+	two := 2.0
+	v.Shape.Value = Circle{Radius: &two}
+	updated, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal updated: %v", err)
+	}
+	var re map[string]any
+	if err := json.Unmarshal(updated, &re); err != nil {
+		t.Fatalf("re-unmarshal updated: %v", err)
+	}
+	if re["radius"] != 2.0 {
+		t.Errorf("stale catch-all copy overrode the updated union value: %s", updated)
 	}
 }
 
@@ -495,13 +531,66 @@ func TestEmbeddedUnionWithoutOwnCatchAll(t *testing.T) {
 	}
 }
 
-// A scalar union value cannot be part of a JSON object; marshaling used to fail
-// with a bare syntax error from splicing after the promoted union marshaler.
+// A scalar union value cannot be part of a JSON object, so marshaling fails
+// with an error that names the embedded field.
 func TestEmbeddedUnionScalarVariantFailsWithNamedError(t *testing.T) {
 	label := "L"
 	v := Tagged{Shape: Shape{Value: "not an object"}, Label: &label}
 	if _, err := json.Marshal(v); err == nil || !strings.Contains(err.Error(), "Shape") {
 		t.Errorf("marshal = %v, want an error naming the embedded Shape", err)
+	}
+}
+
+// The composed type's catch-all is narrower than the embedded one, so an extra
+// only the wider embedded map can hold must survive there.
+func TestOffTypeExtraSurvivesInTheWiderEmbeddedCatchAll(t *testing.T) {
+	var s StrictChild
+	if err := json.Unmarshal([]byte(` + "`" + `{"id":"x","name":"n","note":"ok","count":3}` + "`" + `), &s); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := s.AdditionalProperties["note"]; got != "ok" {
+		t.Errorf("AdditionalProperties[note] = %v, want ok", got)
+	}
+	if _, ok := s.AdditionalProperties["count"]; ok {
+		t.Errorf("off-type extra landed in the string catch-all: %v", s.AdditionalProperties)
+	}
+	if got := s.Parent.AdditionalProperties["count"]; got != float64(3) {
+		t.Errorf("Parent.AdditionalProperties[count] = %v, want 3", got)
+	}
+
+	out, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{` + "`" + `"id"` + "`" + `, ` + "`" + `"name"` + "`" + `, ` + "`" + `"note"` + "`" + `, ` + "`" + `"count"` + "`" + `} {
+		if n := strings.Count(string(out), key); n != 1 {
+			t.Errorf("%s emitted %d times: %s", key, n, out)
+		}
+	}
+}
+
+// Mutually recursive allOf schemas embed each other; decoding must terminate
+// instead of re-entering the same unmarshaler until the stack overflows.
+func TestCyclicSchemasDecodeWithoutOverflowingTheStack(t *testing.T) {
+	var node Node
+	if err := json.Unmarshal([]byte(` + "`" + `{"label":"a","extra":"e"}` + "`" + `), &node); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if node.Label == nil || *node.Label != "a" {
+		t.Errorf("Label = %v, want a", node.Label)
+	}
+	if got := node.AdditionalProperties["extra"]; got != "e" {
+		t.Errorf("AdditionalProperties[extra] = %v, want e", got)
+	}
+
+	out, err := json.Marshal(node)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, key := range []string{` + "`" + `"label"` + "`" + `, ` + "`" + `"extra"` + "`" + `} {
+		if n := strings.Count(string(out), key); n != 1 {
+			t.Errorf("%s emitted %d times: %s", key, n, out)
+		}
 	}
 }
 

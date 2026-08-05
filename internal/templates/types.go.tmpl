@@ -155,7 +155,7 @@ func encodeObject(members []jsonMember) ([]byte, error) {
 			}
 			extra[key] = raw
 		}
-		deleteDeclaredProperties(extra, []string{ {{ range $i, $n := declaredJSONNames $ $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
+		deleteDeclaredProperties(extra, {{ declaredNamesLiteral $ $td }})
 		if len(extra) > 0 {
 			encoded, err := json.Marshal(extra)
 			if err != nil {
@@ -175,7 +175,8 @@ func encodeObject(members []jsonMember) ([]byte, error) {
 {{ else }}// UnmarshalJSON implements json.Unmarshaler for {{ $typeName }}, collecting
 // properties the schema does not declare into {{ $catchAll.Name }}.
 {{ end }}func (t *{{ $typeName }}) UnmarshalJSON(data []byte) error {
-{{ if $embeds }}{{ range $embeds }}	if err := json.Unmarshal(data, &t.{{ fieldGoName . }}); err != nil {
+{{ with $catchAll }}	t.{{ .Name }} = nil
+{{ end }}{{ if $embeds }}{{ range decodedEmbeds $ $td }}	if err := json.Unmarshal(data, &t.{{ fieldGoName . }}); err != nil {
 		return err
 	}
 {{ end }}{{ if $plain }}	own := struct {
@@ -192,13 +193,24 @@ func encodeObject(members []jsonMember) ([]byte, error) {
 	if err := json.Unmarshal(data, (*shadow)(t)); err != nil {
 		return err
 	}
-{{ end }}{{ with $catchAll }}	t.{{ .Name }} = nil
-	var obj map[string]json.RawMessage
+{{ end }}{{ with $catchAll }}	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return err
 	}
-	deleteDeclaredProperties(obj, []string{ {{ range $i, $n := declaredJSONNames $ $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
-	if len(obj) > 0 {
+	deleteDeclaredProperties(obj, {{ declaredNamesLiteral $ $td }})
+{{ range opaqueEmbeds $ $td }}	// The embedded union's keys depend on its decoded variant, so the catch-all
+	// is pruned with the keys the value actually marshals.
+	if part, err := json.Marshal(t.{{ fieldGoName . }}); err == nil {
+		var partObj map[string]json.RawMessage
+		if json.Unmarshal(part, &partObj) == nil {
+			keys := make([]string, 0, len(partObj))
+			for key := range partObj {
+				keys = append(keys, key)
+			}
+			deleteDeclaredProperties(obj, keys)
+		}
+	}
+{{ end }}	if len(obj) > 0 {
 		t.{{ .Name }} = make({{ .Type }}, len(obj))
 		for key, raw := range obj {
 			var value {{ catchAllValueType . }}
@@ -214,18 +226,25 @@ func encodeObject(members []jsonMember) ([]byte, error) {
 			t.{{ .Name }} = nil
 		}
 	}
-{{ end }}{{ if $embeds }}{{ with embeddedCatchAlls $ $td }}{{ if $catchAll }}	// The embedded unmarshalers ran on the full object, so their catch-alls hold
-	// this type's declared fields and the extras collected above; clear them.
+{{ end }}{{ if $embeds }}{{ with embeddedCatchAlls $ $td }}	// The embedded unmarshalers ran on the full object, so their catch-alls also
+	// collected this type's declared fields{{ if $catchAll }} and the extras gathered above; an
+	// off-type extra a narrower catch-all rejected stays with the embed that took it{{ end }}.
 {{ range . }}{{ if .Guard }}	if {{ .Guard }} {
+		deleteDeclaredProperties(t.{{ .Path }}, {{ declaredNamesLiteral $ $td }})
+{{ if $catchAll }}		for key := range t.{{ $catchAll.Name }} {
+			delete(t.{{ .Path }}, key)
+		}
+		if len(t.{{ .Path }}) == 0 {
+			t.{{ .Path }} = nil
+		}
+{{ end }}	}
+{{ else }}	deleteDeclaredProperties(t.{{ .Path }}, {{ declaredNamesLiteral $ $td }})
+{{ if $catchAll }}	for key := range t.{{ $catchAll.Name }} {
+		delete(t.{{ .Path }}, key)
+	}
+	if len(t.{{ .Path }}) == 0 {
 		t.{{ .Path }} = nil
 	}
-{{ else }}	t.{{ .Path }} = nil
-{{ end }}{{ end }}{{ else }}	// The embedded unmarshalers ran on the full object, so their catch-alls also
-	// collected this type's declared fields; only true extras belong there.
-{{ range . }}{{ if .Guard }}	if {{ .Guard }} {
-		deleteDeclaredProperties(t.{{ .Path }}, []string{ {{ range $i, $n := declaredJSONNames $ $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
-	}
-{{ else }}	deleteDeclaredProperties(t.{{ .Path }}, []string{ {{ range $i, $n := declaredJSONNames $ $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
 {{ end }}{{ end }}{{ end }}{{ end }}{{ end }}	return nil
 }
 {{ end }}

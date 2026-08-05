@@ -2,7 +2,9 @@ package generator
 
 import (
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 
 	naming "github.com/giraffesyo/openapi-go-naming"
@@ -31,13 +33,15 @@ func FuncMap() template.FuncMap {
 		"hasUntypedVariant":       hasUntypedVariant,
 		"catchAllField":           catchAllField,
 		"catchAllValueType":       catchAllValueType,
-		"declaredJSONNames":       declaredJSONNames,
 		"hasCatchAllTypes":        hasCatchAllTypes,
 		"marshalerEmbeds":         marshalerEmbeds,
 		"plainFields":             plainFields,
 		"fieldGoName":             fieldGoName,
 		"embeddedCatchAlls":       embeddedCatchAlls,
 		"hasMarshalerEmbeds":      hasMarshalerEmbeds,
+		"decodedEmbeds":           decodedEmbeds,
+		"opaqueEmbeds":            opaqueEmbeds,
+		"declaredNamesLiteral":    declaredNamesLiteral,
 		"discriminatorFieldName":  discriminatorFieldName,
 		"hasPaginatedOps":         hasPaginatedOps,
 		"paginationItemType":      paginationItemType,
@@ -232,7 +236,7 @@ func catchAllValueType(f *ir.Field) string {
 // fields, an embedded type's included: those are promoted onto the struct, so a
 // catch-all that re-collected them would emit each one twice.
 func declaredJSONNames(pkg *ir.Package, td *ir.TypeDef) []string {
-	byName := ir.TypesByName(pkg.Types)
+	byName := typeIndex(pkg).byName
 
 	var names []string
 	visited := make(map[string]bool)
@@ -260,6 +264,16 @@ func declaredJSONNames(pkg *ir.Package, td *ir.TypeDef) []string {
 	return names
 }
 
+// declaredNamesLiteral renders declaredJSONNames as a Go []string literal.
+func declaredNamesLiteral(pkg *ir.Package, td *ir.TypeDef) string {
+	names := declaredJSONNames(pkg, td)
+	quoted := make([]string, len(names))
+	for i, name := range names {
+		quoted[i] = strconv.Quote(name)
+	}
+	return "[]string{" + strings.Join(quoted, ", ") + "}"
+}
+
 func hasCatchAllTypes(types []*ir.TypeDef) bool {
 	return slices.ContainsFunc(types, func(td *ir.TypeDef) bool {
 		return catchAllField(td) != nil
@@ -284,36 +298,56 @@ func terminalTypeName(byName map[string]*ir.TypeDef, goType string) string {
 	return name
 }
 
-// customMarshalerTypes returns the names of generated types whose method set
-// carries MarshalJSON/UnmarshalJSON: unions, structs with a catch-all, and
-// structs that embed such a type and so inherit the methods by promotion.
-func customMarshalerTypes(pkg *ir.Package) map[string]bool {
-	byName := ir.TypesByName(pkg.Types)
-	bearing := make(map[string]bool)
+// pkgTypeIndex carries the package-wide lookups the marshaler helpers share.
+// bearing holds the names of generated types whose method set carries
+// MarshalJSON/UnmarshalJSON: unions, structs with a catch-all, and structs that
+// embed such a type and so inherit the methods by promotion.
+type pkgTypeIndex struct {
+	byName  map[string]*ir.TypeDef
+	bearing map[string]bool
+}
+
+// The bearing fixed point is package-wide but templates ask per type, so the
+// last package's index is cached. A single entry never outlives its package by
+// more than one generate and stays safe under concurrent generates.
+var typeIndexMu sync.Mutex
+var lastTypeIndex struct {
+	pkg *ir.Package
+	idx *pkgTypeIndex
+}
+
+func typeIndex(pkg *ir.Package) *pkgTypeIndex {
+	typeIndexMu.Lock()
+	defer typeIndexMu.Unlock()
+	if lastTypeIndex.pkg == pkg {
+		return lastTypeIndex.idx
+	}
+	idx := &pkgTypeIndex{byName: ir.TypesByName(pkg.Types), bearing: map[string]bool{}}
 	for _, td := range pkg.Types {
 		if td == nil {
 			continue
 		}
 		if td.Kind == ir.TypeKindUnion || catchAllField(td) != nil {
-			bearing[td.Name] = true
+			idx.bearing[td.Name] = true
 		}
 	}
 	for changed := true; changed; {
 		changed = false
 		for _, td := range pkg.Types {
-			if td == nil || td.Kind != ir.TypeKindStruct || bearing[td.Name] {
+			if td == nil || td.Kind != ir.TypeKindStruct || idx.bearing[td.Name] {
 				continue
 			}
 			for _, f := range td.Fields {
-				if f.Embedded && bearing[terminalTypeName(byName, f.Type)] {
-					bearing[td.Name] = true
+				if f.Embedded && idx.bearing[terminalTypeName(idx.byName, f.Type)] {
+					idx.bearing[td.Name] = true
 					changed = true
 					break
 				}
 			}
 		}
 	}
-	return bearing
+	lastTypeIndex.pkg, lastTypeIndex.idx = pkg, idx
+	return idx
 }
 
 // marshalerEmbeds returns the embedded fields whose types carry custom JSON
@@ -325,11 +359,62 @@ func marshalerEmbeds(pkg *ir.Package, td *ir.TypeDef) []*ir.Field {
 	if td.Kind != ir.TypeKindStruct || len(td.Fields) < 2 {
 		return nil
 	}
-	byName := ir.TypesByName(pkg.Types)
-	bearing := customMarshalerTypes(pkg)
+	idx := typeIndex(pkg)
 	var embeds []*ir.Field
 	for _, f := range td.Fields {
-		if f.Embedded && bearing[terminalTypeName(byName, f.Type)] {
+		if f.Embedded && idx.bearing[terminalTypeName(idx.byName, f.Type)] {
+			embeds = append(embeds, f)
+		}
+	}
+	return embeds
+}
+
+// decodedEmbeds returns the marshaler embeds UnmarshalJSON decodes in place. A
+// pointer embed that closes a reference cycle stays nil: decoding it would
+// re-enter this unmarshaler with the same bytes and recurse until the stack
+// overflows, and encoding/json also stops its field walk where a type repeats.
+func decodedEmbeds(pkg *ir.Package, td *ir.TypeDef) []*ir.Field {
+	byName := typeIndex(pkg).byName
+	var embeds []*ir.Field
+	for _, f := range marshalerEmbeds(pkg, td) {
+		if strings.HasPrefix(f.Type, "*") && embedsReach(byName, f.Type, td.Name) {
+			continue
+		}
+		embeds = append(embeds, f)
+	}
+	return embeds
+}
+
+func embedsReach(byName map[string]*ir.TypeDef, goType, target string) bool {
+	seen := map[string]bool{}
+	var walk func(goType string) bool
+	walk = func(goType string) bool {
+		td := ir.StructNamed(byName, strings.TrimPrefix(goType, "*"))
+		if td == nil || seen[td.Name] {
+			return false
+		}
+		if td.Name == target {
+			return true
+		}
+		seen[td.Name] = true
+		for _, f := range td.Fields {
+			if f.Embedded && walk(f.Type) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(goType)
+}
+
+// opaqueEmbeds returns the marshaler embeds whose wire keys cannot be listed
+// statically (unions): the unmarshaler prunes the catch-all with the keys the
+// decoded value actually marshals instead.
+func opaqueEmbeds(pkg *ir.Package, td *ir.TypeDef) []*ir.Field {
+	byName := typeIndex(pkg).byName
+	var embeds []*ir.Field
+	for _, f := range marshalerEmbeds(pkg, td) {
+		if ir.StructNamed(byName, strings.TrimPrefix(f.Type, "*")) == nil {
 			embeds = append(embeds, f)
 		}
 	}
@@ -373,7 +458,7 @@ type EmbeddedCatchAll struct {
 // embedded types, which the enclosing type's UnmarshalJSON has to clean up
 // after the embedded unmarshalers have run.
 func embeddedCatchAlls(pkg *ir.Package, td *ir.TypeDef) []EmbeddedCatchAll {
-	byName := ir.TypesByName(pkg.Types)
+	byName := typeIndex(pkg).byName
 
 	var found []EmbeddedCatchAll
 	seen := map[string]bool{td.Name: true}
@@ -383,7 +468,7 @@ func embeddedCatchAlls(pkg *ir.Package, td *ir.TypeDef) []EmbeddedCatchAll {
 			if !f.Embedded {
 				continue
 			}
-			embedded := ir.StructNamed(byName, strings.TrimPrefix(f.Type, "*"))
+			embedded := ir.StructNamed(byName, fieldGoName(f))
 			if embedded == nil || seen[embedded.Name] {
 				continue
 			}
