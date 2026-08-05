@@ -455,3 +455,46 @@ components:
 		}
 	}
 }
+
+// TestUnion_AlongsideCompositionKeepsTheObject pins that a oneOf/anyOf used to
+// constrain an object -- "exactly one of these is required", or a refinement of
+// an allOf -- does not collapse the schema onto one of its members, throwing the
+// declared properties and the composition away.
+func TestUnion_AlongsideCompositionKeepsTheObject(t *testing.T) {
+	_, typeMap := analyzeSpec(t, `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths: {}
+components:
+  schemas:
+    Wrapper:
+      type: object
+      properties: { w: { type: string } }
+    ConstrainedObject:
+      type: object
+      properties:
+        a: { type: string }
+        b: { type: string }
+      oneOf:
+        - required: [a]
+        - required: [b]
+    ComposedWithUnion:
+      allOf: [{ $ref: "#/components/schemas/Wrapper" }]
+      oneOf: [{ type: string }, { type: string, format: date }]
+`)
+
+	obj := typeMap["ConstrainedObject"]
+	if obj == nil || obj.Kind != ir.TypeKindStruct {
+		t.Fatalf("ConstrainedObject = %+v, want a struct", obj)
+	}
+	if len(obj.Fields) != 2 {
+		t.Errorf("ConstrainedObject has %d fields, want its two declared properties", len(obj.Fields))
+	}
+
+	composed := typeMap["ComposedWithUnion"]
+	if composed == nil || composed.Kind != ir.TypeKindStruct {
+		t.Fatalf("ComposedWithUnion = %+v, want a struct", composed)
+	}
+	if len(composed.Fields) != 1 || !composed.Fields[0].Embedded || composed.Fields[0].Type != "Wrapper" {
+		t.Errorf("ComposedWithUnion fields = %+v, want the embedded Wrapper", composed.Fields)
+	}
+}

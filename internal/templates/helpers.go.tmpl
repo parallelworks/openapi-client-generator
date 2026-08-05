@@ -527,12 +527,12 @@ func writeMultipartField(w *multipart.Writer, name string, rv reflect.Value) err
 
 	switch {
 	case isByteSlice(rv):
-		// A nil slice is an unset optional property; an empty non-nil one is an
-		// empty file the caller asked for.
+		// Files arrive as a FormFile, so a byte slice here is OpenAPI's
+		// format: byte — base64 text, not an upload. A nil one is unset.
 		if rv.IsNil() {
 			return nil
 		}
-		return writeFilePart(w, name, FormFile{Content: rv.Bytes()})
+		return w.WriteField(name, formatScalar(rv))
 	case isSlice(rv):
 		for i := 0; i < rv.Len(); i++ {
 			if err := writeMultipartField(w, name, rv.Index(i)); err != nil {

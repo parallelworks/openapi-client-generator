@@ -23,30 +23,31 @@ func (a *Analyzer) convertSchema(goName, specName string, schema *highbase.Schem
 		return a.convertEnum(goName, schema, nullable)
 	}
 
-	// A oneOf/anyOf whose only other member is `type: null` is how OpenAPI 3.1
-	// spells "nullable T"; it offers no choice to model, so generate T itself.
-	if variant, ok := nullableUnionVariant(schema); ok {
-		return a.convertNullableUnion(goName, specName, schema, variant)
-	}
-	if goType, ok := a.uniformUnionGoType(schema, goName); ok {
-		return &ir.TypeDef{
-			Name:        goName,
-			Description: schema.Description,
-			Kind:        ir.TypeKindAlias,
-			GoType:      goType,
-			IsNullable:  nullable,
-		}, nil
+	if isPureUnion(schema) {
+		// A oneOf/anyOf whose only other member is `type: null` is how OpenAPI 3.1
+		// spells "nullable T"; it offers no choice to model, so generate T itself.
+		if variant, ok := nullableUnionVariant(schema); ok {
+			return a.convertNullableUnion(goName, specName, schema, variant)
+		}
+		if goType, ok := a.uniformUnionGoType(schema, goName); ok {
+			return &ir.TypeDef{
+				Name:        goName,
+				Description: schema.Description,
+				Kind:        ir.TypeKindAlias,
+				GoType:      goType,
+				IsNullable:  nullable,
+			}, nil
+		}
+		if len(schema.OneOf) > 0 {
+			return a.convertOneOf(goName, schema, nullable)
+		}
+		if len(schema.AnyOf) > 0 {
+			return a.convertAnyOf(goName, schema, nullable)
+		}
 	}
 
-	// Composition types: allOf, oneOf, anyOf.
 	if len(schema.AllOf) > 0 {
 		return a.convertAllOf(goName, schema, nullable, a.multipartBodies[specName])
-	}
-	if len(schema.OneOf) > 0 {
-		return a.convertOneOf(goName, schema, nullable)
-	}
-	if len(schema.AnyOf) > 0 {
-		return a.convertAnyOf(goName, schema, nullable)
 	}
 
 	primaryType := primaryType(schema)
@@ -698,6 +699,14 @@ func isNullable(schema *highbase.Schema) bool {
 		return true
 	}
 	return slices.ContainsFunc(unionVariants(schema), isNullVariant)
+}
+
+// isPureUnion reports whether a schema's oneOf/anyOf is the whole of what it is.
+// A schema that also composes or declares properties uses the union to constrain
+// the object the rest of it describes, so collapsing to a member would throw that
+// away.
+func isPureUnion(schema *highbase.Schema) bool {
+	return len(schema.AllOf) == 0 && (schema.Properties == nil || schema.Properties.Len() == 0)
 }
 
 // unionVariants returns a schema's oneOf variants, or its anyOf variants when it

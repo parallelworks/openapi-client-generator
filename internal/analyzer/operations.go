@@ -49,6 +49,7 @@ func pathOperations(pathItem *v3high.PathItem) []pathOperation {
 		{"PATCH", pathItem.Patch},
 		{"HEAD", pathItem.Head},
 		{"OPTIONS", pathItem.Options},
+		{"TRACE", pathItem.Trace},
 	}
 	return slices.DeleteFunc(all, func(m pathOperation) bool { return m.op == nil })
 }
@@ -72,13 +73,78 @@ func (a *Analyzer) collectMultipartBodySchemas() map[string]bool {
 			if !strings.HasPrefix(contentType, "multipart/") || mediaType == nil || mediaType.Schema == nil {
 				continue
 			}
-			if name := refToSchemaName(mediaType.Schema.GetReference()); name != "" {
-				names[name] = true
-			}
+			a.markMultipartSchema(names, refToSchemaName(mediaType.Schema.GetReference()), 0)
 		}
 	}
 	return names
 }
+
+// reserveDerivedNames keeps a schema off the identifiers the templates build out
+// of an operation or an error body, which share the one package scope with it.
+func (a *Analyzer) reserveDerivedNames() {
+	if a.model.Paths == nil || a.model.Paths.PathItems == nil {
+		return
+	}
+
+	for path, pathItem := range a.model.Paths.PathItems.FromOldest() {
+		for _, m := range pathOperations(pathItem) {
+			a.namer.Reserve(a.operationName(m.method, path, m.op) + "Params")
+
+			if m.op.Responses == nil || m.op.Responses.Codes == nil {
+				continue
+			}
+			for code, resp := range m.op.Responses.Codes.FromOldest() {
+				if isErrorCode(code) {
+					a.reserveErrorResponseName(resp)
+				}
+			}
+			a.reserveErrorResponseName(m.op.Responses.Default)
+		}
+	}
+}
+
+// reserveErrorResponseName reserves the wrapper type errors.go declares for an
+// error body.
+func (a *Analyzer) reserveErrorResponseName(resp *v3high.Response) {
+	if resp == nil || resp.Content == nil {
+		return
+	}
+	for _, mediaType := range resp.Content.FromOldest() {
+		if mediaType == nil || mediaType.Schema == nil {
+			continue
+		}
+		if refName := refToSchemaName(mediaType.Schema.GetReference()); refName != "" {
+			a.namer.Reserve(naming.Exported(refName) + "Response")
+		}
+	}
+}
+
+// markMultipartSchema marks a schema and everything it composes with allOf, so a
+// binary property inherited through composition is still generated as a file.
+func (a *Analyzer) markMultipartSchema(names map[string]bool, refName string, depth int) {
+	if refName == "" || names[refName] || depth > maxSchemaDepth {
+		return
+	}
+	names[refName] = true
+
+	if a.model.Components == nil || a.model.Components.Schemas == nil {
+		return
+	}
+	proxy, ok := a.model.Components.Schemas.Get(refName)
+	if !ok || proxy == nil {
+		return
+	}
+	schema, err := proxy.BuildSchema()
+	if err != nil || schema == nil {
+		return
+	}
+	for _, entry := range schema.AllOf {
+		a.markMultipartSchema(names, refToSchemaName(entry.GetReference()), depth+1)
+	}
+}
+
+// maxSchemaDepth bounds a walk over schemas that may refer to one another.
+const maxSchemaDepth = 32
 
 // preferredContent picks the media type a request body is sent as: JSON when the
 // spec offers a choice, otherwise the first one it lists.
@@ -324,28 +390,60 @@ func (a *Analyzer) convertRequestBody(rb *v3high.RequestBody, nameHint string) (
 		Required:    rb.Required != nil && *rb.Required,
 		Description: rb.Description,
 		ContentType: contentType,
-		TypeName:    bodyGoType(contentType, a.resolveMediaTypeSchema(mediaType, nameHint)),
+		TypeName:    bodyGoType(contentType, a.resolveMediaTypeSchema(mediaType, nameHint), mediaTypeSchema(mediaType)),
 	}, nil
 }
 
-// structuredContentType reports whether the generated client can encode a Go
-// value into contentType from the schema alone.
-func structuredContentType(contentType string) bool {
-	return strings.Contains(contentType, "json") ||
-		strings.HasPrefix(contentType, "multipart/") ||
+// formEncodedContentType reports whether a body is sent as form data, whose
+// encoders walk the value property by property.
+func formEncodedContentType(contentType string) bool {
+	return strings.HasPrefix(contentType, "multipart/") ||
 		strings.HasPrefix(contentType, "application/x-www-form-urlencoded")
+}
+
+// mediaTypeSchema builds a media type's schema, resolving a reference to the
+// schema it names.
+func mediaTypeSchema(mt *v3high.MediaType) *highbase.Schema {
+	if mt == nil || mt.Schema == nil {
+		return nil
+	}
+	schema, err := mt.Schema.BuildSchema()
+	if err != nil {
+		return nil
+	}
+	return schema
+}
+
+// isObjectLike reports whether a schema describes something with properties to
+// walk rather than a scalar or a list.
+func isObjectLike(schema *highbase.Schema) bool {
+	if schema == nil {
+		return false
+	}
+	if primaryType(schema) == "object" || len(schema.AllOf) > 0 {
+		return true
+	}
+	return schema.Properties != nil && schema.Properties.Len() > 0
 }
 
 // bodyGoType is the Go type a request body is accepted as. A body the client
 // cannot structurally encode — XML, say — is taken as the bytes or text it
 // already is rather than as a struct there would be no encoder for, and a body
 // the spec declares without a schema still needs some type to be passed as.
-func bodyGoType(contentType, typeName string) string {
-	if structuredContentType(contentType) {
+func bodyGoType(contentType, typeName string, schema *highbase.Schema) string {
+	switch {
+	case strings.Contains(contentType, "json"):
 		if typeName == "" {
 			return "any"
 		}
 		return typeName
+	case formEncodedContentType(contentType):
+		// The form encoders build parts and pairs out of an object's properties,
+		// so a body that is not an object gives them nothing to work from.
+		if isObjectLike(schema) {
+			return typeName
+		}
+		return "map[string]any"
 	}
 	switch typeName {
 	case "string", "[]byte":

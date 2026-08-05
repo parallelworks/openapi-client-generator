@@ -28,6 +28,7 @@ func FuncMap() template.FuncMap {
 		"hasRequiredCookieParams": hasRequiredCookieParams,
 		"paramType":               paramType,
 		"hasUnions":               hasUnions,
+		"hasUntypedVariant":       hasUntypedVariant,
 		"catchAllField":           catchAllField,
 		"catchAllValueType":       catchAllValueType,
 		"declaredJSONNames":       declaredJSONNames,
@@ -226,6 +227,8 @@ func catchAllValueType(f *ir.Field) string {
 // fields, an embedded type's included: those are promoted onto the struct, so a
 // catch-all that re-collected them would emit each one twice.
 func declaredJSONNames(pkg *ir.Package, td *ir.TypeDef) []string {
+	byName := ir.TypesByName(pkg.Types)
+
 	var names []string
 	visited := make(map[string]bool)
 
@@ -239,7 +242,9 @@ func declaredJSONNames(pkg *ir.Package, td *ir.TypeDef) []string {
 			switch {
 			case f.CatchAll:
 			case f.Embedded:
-				walk(structByName(pkg, f.Type))
+				// The type may be written as a pointer where an indirection broke a
+				// reference cycle, and may be an alias standing for the struct.
+				walk(ir.StructNamed(byName, strings.TrimPrefix(f.Type, "*")))
 			case f.JSONName == "" || f.JSONName == "-":
 			default:
 				names = append(names, f.JSONName)
@@ -248,18 +253,6 @@ func declaredJSONNames(pkg *ir.Package, td *ir.TypeDef) []string {
 	}
 	walk(td)
 	return names
-}
-
-// structByName returns the generated struct of the given Go type, which may be
-// written as a pointer where an indirection broke a reference cycle.
-func structByName(pkg *ir.Package, goType string) *ir.TypeDef {
-	goType = strings.TrimPrefix(goType, "*")
-	for _, td := range pkg.Types {
-		if td.Name == goType && td.Kind == ir.TypeKindStruct {
-			return td
-		}
-	}
-	return nil
 }
 
 func hasCatchAllTypes(types []*ir.TypeDef) bool {
@@ -319,6 +312,12 @@ func hasUnions(types []*ir.TypeDef) bool {
 		}
 	}
 	return false
+}
+
+// hasUntypedVariant reports whether a union has a variant no Go type could be
+// derived for, whose payloads nothing but an any decode accepts.
+func hasUntypedVariant(td *ir.TypeDef) bool {
+	return slices.ContainsFunc(td.UnionTypes, func(v *ir.UnionVariant) bool { return v.TypeName == "any" })
 }
 
 // discriminatorFieldName converts a JSON property name to a Go field name

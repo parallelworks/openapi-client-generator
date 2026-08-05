@@ -67,6 +67,10 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 	// them are converted.
 	a.multipartBodies = a.collectMultipartBodySchemas()
 
+	// Schema names are assigned next, and must avoid the identifiers the templates
+	// derive from operations and error bodies.
+	a.reserveDerivedNames()
+
 	// Analyze component schemas.
 	if err := a.analyzeComponentSchemas(pkg); err != nil {
 		return nil, err

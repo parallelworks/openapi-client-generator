@@ -43,7 +43,9 @@ func breakAliasCycles(types []*ir.TypeDef) {
 
 		state[name] = visiting
 		if target := aliasTarget(td.GoType); target != "" && walk(target) {
-			td.GoType = "any"
+			// Only the cyclic referent has to go; the slice or map around it is
+			// still what the caller gets.
+			td.GoType = strings.TrimSuffix(td.GoType, target) + "any"
 		}
 		state[name] = done
 		return false
@@ -61,32 +63,7 @@ func breakAliasCycles(types []*ir.TypeDef) {
 // alias. A field that is already a pointer, slice, or map stops the recursion on
 // its own; a required $ref to the enclosing type does not.
 func breakStructCycles(types []*ir.TypeDef) {
-	byName := make(map[string]*ir.TypeDef, len(types))
-	for _, td := range types {
-		if td != nil {
-			byName[td.Name] = td
-		}
-	}
-
-	// containedStruct returns the struct a field of this type holds by value,
-	// following aliases to the definition they stand for.
-	containedStruct := func(goType string) *ir.TypeDef {
-		for range len(types) + 1 {
-			td, ok := byName[namedType(goType)]
-			if !ok {
-				return nil
-			}
-			switch td.Kind {
-			case ir.TypeKindStruct:
-				return td
-			case ir.TypeKindAlias:
-				goType = td.GoType
-			default:
-				return nil
-			}
-		}
-		return nil
-	}
+	byName := ir.TypesByName(types)
 
 	const (
 		visiting = 1
@@ -98,7 +75,9 @@ func breakStructCycles(types []*ir.TypeDef) {
 	walk = func(td *ir.TypeDef) {
 		state[td.Name] = visiting
 		for _, f := range td.Fields {
-			next := containedStruct(f.Type)
+			// A field already written as a pointer, slice, or map stops the
+			// recursion on its own, and ir.StructNamed rejects all three.
+			next := ir.StructNamed(byName, f.Type)
 			if next == nil {
 				continue
 			}
@@ -122,22 +101,10 @@ func breakStructCycles(types []*ir.TypeDef) {
 	}
 }
 
-// dropShadowedCatchAlls removes the catch-all from a struct that embeds a type
-// which already has one. The generated marshalers shadow the struct to reach
-// encoding/json, and a shadow still promotes an embedded type's MarshalJSON — so
-// the two catch-alls would fight and the embedded one would win, emitting only
-// its own fields. Leaving the outer schema's undeclared properties uncollected
-// is the narrower loss, and it is what the generator did before composed schemas
-// collected any at all.
-//
-// Handling both at once needs the shadow replaced with field-by-field marshaling.
+// dropShadowedCatchAlls removes the catch-all from a struct that embeds one,
+// whose promoted marshalers would otherwise win and emit only their own fields.
 func dropShadowedCatchAlls(types []*ir.TypeDef) {
-	byName := make(map[string]*ir.TypeDef, len(types))
-	for _, td := range types {
-		if td != nil && td.Kind == ir.TypeKindStruct {
-			byName[td.Name] = td
-		}
-	}
+	byName := ir.TypesByName(types)
 
 	hasCatchAll := func(td *ir.TypeDef) bool {
 		return slices.ContainsFunc(td.Fields, func(f *ir.Field) bool { return f.CatchAll })
@@ -153,7 +120,7 @@ func dropShadowedCatchAlls(types []*ir.TypeDef) {
 			if !f.Embedded {
 				continue
 			}
-			embedded := byName[namedType(strings.TrimPrefix(f.Type, "*"))]
+			embedded := ir.StructNamed(byName, strings.TrimPrefix(f.Type, "*"))
 			if embedded == nil {
 				continue
 			}
@@ -191,16 +158,7 @@ func aliasTarget(goType string) string {
 			}
 			goType = goType[end+1:]
 		default:
-			return namedType(goType)
+			return ir.NamedType(goType)
 		}
 	}
-}
-
-// namedType returns goType when it is a bare type name rather than a builtin or
-// a qualified type from another package.
-func namedType(goType string) string {
-	if goType == "" || goType == "any" || strings.ContainsAny(goType, ".[]*{} ") {
-		return ""
-	}
-	return goType
 }

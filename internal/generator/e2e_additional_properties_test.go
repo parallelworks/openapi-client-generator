@@ -49,6 +49,15 @@ components:
           properties:
             name: { type: string }
       additionalProperties: true
+    NullableBase:
+      anyOf: [{ $ref: "#/components/schemas/Base" }, { type: "null" }]
+    ComposedThroughAlias:
+      allOf:
+        - $ref: "#/components/schemas/NullableBase"
+        - type: object
+          properties:
+            note: { type: string }
+      additionalProperties: true
 `
 
 const additionalPropertiesRuntimeTest = `package petsapi
@@ -225,6 +234,26 @@ func TestOffTypeExtraDoesNotFailTheDecode(t *testing.T) {
 	}
 	if _, ok := l.AdditionalProperties["count"]; ok {
 		t.Error("a property that does not match the declared value type was kept anyway")
+	}
+}
+
+// The embedded schema is reached through an alias, so the catch-all still has to
+// recognize the properties that alias promotes as already declared.
+func TestPropertiesInheritedThroughAnAliasAreNotRecollected(t *testing.T) {
+	var c ComposedThroughAlias
+	if err := json.Unmarshal([]byte(` + "`" + `{"id":"x","note":"n","extra":"kept"}` + "`" + `), &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := c.AdditionalProperties["id"]; ok {
+		t.Error("a property promoted through an aliased embed landed in the catch-all")
+	}
+
+	out, err := json.Marshal(c)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if n := strings.Count(string(out), ` + "`" + `"id"` + "`" + `); n != 1 {
+		t.Errorf("id emitted %d times: %s", n, out)
 	}
 }
 `

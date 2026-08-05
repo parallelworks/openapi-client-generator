@@ -211,6 +211,17 @@ func (u *{{ $typeName }}) UnmarshalJSON(data []byte) error {
 	}
 {{- end }}
 {{- end }}
+{{- if hasUntypedVariant . }}
+	// A variant with no Go type of its own still covers payloads the spec says are
+	// valid, so they decode into any rather than failing as an unmatched variant.
+	var untyped any
+	if err := json.Unmarshal(data, &untyped); err == nil {
+		u.Value = untyped
+		return nil
+	} else {
+		errors = append(errors, err)
+	}
+{{- end }}
 	return fmt.Errorf("data did not match any variant of {{ $typeName }}: %v", errors)
 {{- end }}
 }

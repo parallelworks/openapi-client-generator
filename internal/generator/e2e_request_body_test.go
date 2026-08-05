@@ -96,6 +96,7 @@ components:
         tags: { type: array, items: { type: string } }
         meta: { $ref: "#/components/schemas/ImageMeta" }
         attachments: { type: array, items: { type: string, format: binary } }
+        signature: { type: string, format: byte }
     ImageMeta:
       type: object
       required: [source]
@@ -213,6 +214,7 @@ func TestMultipartBodyIsSentAsMultipart(t *testing.T) {
 		Tags:        []string{"dinner", "quick"},
 		Meta:        &ImageMeta{Source: "phone"},
 		Attachments: []FormFile{{Filename: "notes.txt", Content: []byte("first")}, {Content: []byte("second")}},
+		Signature:   []byte("sig"),
 	})
 	if err != nil {
 		t.Fatalf("UpdateRecipeImage: %v", err)
@@ -274,6 +276,14 @@ func TestMultipartBodyIsSentAsMultipart(t *testing.T) {
 	}
 	if got := values["meta"]; len(got) != 1 || got[0] != ` + "`" + `{"source":"phone"}` + "`" + ` {
 		t.Errorf("meta part = %v, want the object as JSON", got)
+	}
+
+	// format: byte is base64 text, not an upload, so it is a value part.
+	if got := values["signature"]; len(got) != 1 || got[0] != "c2ln" {
+		t.Errorf("signature part = %v, want the base64 text [c2ln]", got)
+	}
+	if _, ok := req.MultipartForm.File["signature"]; ok {
+		t.Error("format: byte was sent as a file part")
 	}
 
 	// An array of files becomes one file part per element, and a file with no
