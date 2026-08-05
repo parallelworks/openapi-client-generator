@@ -434,7 +434,7 @@ func allowsAdditionalProperties(schema *highbase.Schema) bool {
 	if ap == nil {
 		return false
 	}
-	return !(ap.IsB() && !ap.B)
+	return !ap.IsB() || ap.B
 }
 
 // catchAllFieldName picks a Go name for the synthetic additionalProperties field
