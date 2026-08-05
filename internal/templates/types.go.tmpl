@@ -3,9 +3,12 @@
 package {{ .Name }}
 
 import (
-{{- if or (hasUnions .Types) (hasCatchAllTypes .Types) }}
+{{- if or (hasUnions .Types) (hasCatchAllTypes .Types) (hasMarshalerEmbeds $) }}
 	"encoding/json"
 	"fmt"
+{{- end }}
+{{- if or (hasCatchAllTypes .Types) (hasMarshalerEmbeds $) }}
+	"bytes"
 {{- end }}
 {{- if hasCatchAllTypes .Types }}
 	"strings"
@@ -17,7 +20,7 @@ import (
 // deleteDeclaredProperties drops the keys encoding/json already consumed into
 // struct fields. The match is case-insensitive because that is the fallback
 // encoding/json itself uses, so "Name" must not also land in the catch-all map.
-func deleteDeclaredProperties(obj map[string]json.RawMessage, declared []string) {
+func deleteDeclaredProperties[V any](obj map[string]V, declared []string) {
 	for key := range obj {
 		for _, name := range declared {
 			if strings.EqualFold(key, name) {
@@ -28,6 +31,77 @@ func deleteDeclaredProperties(obj map[string]json.RawMessage, declared []string)
 	}
 }
 {{- end }}
+{{- if or (hasCatchAllTypes .Types) (hasMarshalerEmbeds $) }}
+
+// jsonMember is one key/value pair of a JSON object under assembly.
+type jsonMember struct {
+	key string
+	raw json.RawMessage
+}
+
+// mergeObjectMembers appends src's members to dst in order, replacing the value
+// of a key dst already holds. src must be a JSON object; null is a no-op, the
+// way encoding/json treats a nil embedded pointer.
+func mergeObjectMembers(dst []jsonMember, src []byte) ([]jsonMember, error) {
+	trimmed := bytes.TrimSpace(src)
+	if bytes.Equal(trimmed, []byte("null")) {
+		return dst, nil
+	}
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, fmt.Errorf("cannot merge non-object value %s into a JSON object", trimmed)
+	}
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	if _, err := dec.Token(); err != nil {
+		return nil, err
+	}
+	for dec.More() {
+		keyToken, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return nil, fmt.Errorf("unexpected token %v in JSON object", keyToken)
+		}
+		var value json.RawMessage
+		if err := dec.Decode(&value); err != nil {
+			return nil, err
+		}
+		replaced := false
+		for i := range dst {
+			if dst[i].key == key {
+				dst[i].raw = value
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			dst = append(dst, jsonMember{key: key, raw: value})
+		}
+	}
+	return dst, nil
+}
+
+// encodeObject renders members as a JSON object, preserving their order.
+func encodeObject(members []jsonMember) ([]byte, error) {
+	var buf bytes.Buffer
+	buf.WriteByte('{')
+	for i, m := range members {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		key, err := json.Marshal(m.key)
+		if err != nil {
+			return nil, err
+		}
+		buf.Write(key)
+		buf.WriteByte(':')
+		buf.Write(m.raw)
+	}
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
+}
+{{- end }}
 
 {{ range .Types }}
 {{ $typeDoc := typeDocComment . }}{{ if eq .Kind 0 }}{{ $typeName := .Name }}{{ $td := . }}{{ if $typeDoc }}{{ $typeDoc }}
@@ -36,78 +110,123 @@ func deleteDeclaredProperties(obj map[string]json.RawMessage, declared []string)
 {{ end }}{{ if .Embedded }}	{{ .Type }}
 {{ else }}	{{ .Name }} {{ .Type }} `{{ fieldTag . }}`
 {{ end }}{{ end }}}
-{{ with catchAllField . }}
-// MarshalJSON implements json.Marshaler for {{ $typeName }}, inlining
-// {{ .Name }} alongside the schema's declared properties.
-func (t {{ $typeName }}) MarshalJSON() ([]byte, error) {
-	type shadow {{ $typeName }}
+{{ $catchAll := catchAllField . }}{{ $embeds := marshalerEmbeds $ . }}{{ $plain := plainFields $ . }}{{ if or $catchAll $embeds }}
+{{ if $embeds }}// MarshalJSON implements json.Marshaler for {{ $typeName }}. The embedded types
+// carry marshalers of their own, so each part is encoded separately and merged;
+// marshaling the whole struct would promote one embedded type's marshaler and
+// let it speak for the entire object.
+{{ else }}// MarshalJSON implements json.Marshaler for {{ $typeName }}, inlining
+// {{ $catchAll.Name }} alongside the schema's declared properties.
+{{ end }}func (t {{ $typeName }}) MarshalJSON() ([]byte, error) {
+	var members []jsonMember
+{{ if $embeds }}{{ range $i, $f := $embeds }}	part{{ $i }}, err := json.Marshal(t.{{ fieldGoName $f }})
+	if err != nil {
+		return nil, err
+	}
+	if members, err = mergeObjectMembers(members, part{{ $i }}); err != nil {
+		return nil, fmt.Errorf("marshaling {{ $typeName }}: embedded {{ fieldGoName $f }}: %w", err)
+	}
+{{ end }}{{ if $plain }}	own, err := json.Marshal(struct {
+{{ range $plain }}{{ if .Embedded }}		{{ .Type }}
+{{ else }}		{{ .Name }} {{ .Type }} `{{ fieldTag . }}`
+{{ end }}{{ end }}	}{
+{{ range $plain }}		{{ fieldGoName . }}: t.{{ fieldGoName . }},
+{{ end }}	})
+	if err != nil {
+		return nil, err
+	}
+	if members, err = mergeObjectMembers(members, own); err != nil {
+		return nil, err
+	}
+{{ end }}{{ else }}	type shadow {{ $typeName }}
 	data, err := json.Marshal(shadow(t))
 	if err != nil {
 		return nil, err
 	}
-	if len(t.{{ .Name }}) == 0 {
-		return data, nil
-	}
-
-	extra := make(map[string]json.RawMessage, len(t.{{ .Name }}))
-	for key, value := range t.{{ .Name }} {
-		raw, err := json.Marshal(value)
-		if err != nil {
-			return nil, fmt.Errorf("marshaling additional property %q: %w", key, err)
-		}
-		extra[key] = raw
-	}
-	deleteDeclaredProperties(extra, []string{ {{ range $i, $n := declaredJSONNames $ $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
-	if len(extra) == 0 {
-		return data, nil
-	}
-	encoded, err := json.Marshal(extra)
-	if err != nil {
+	if members, err = mergeObjectMembers(members, data); err != nil {
 		return nil, err
 	}
-
-	// Splice the two objects together so the declared properties keep their
-	// struct field order instead of being re-sorted through a map.
-	merged := make([]byte, 0, len(data)+len(encoded))
-	merged = append(merged, data[:len(data)-1]...)
-	if len(data) > 2 {
-		merged = append(merged, ',')
+{{ end }}{{ with $catchAll }}	if len(t.{{ .Name }}) > 0 {
+		extra := make(map[string]json.RawMessage, len(t.{{ .Name }}))
+		for key, value := range t.{{ .Name }} {
+			raw, err := json.Marshal(value)
+			if err != nil {
+				return nil, fmt.Errorf("marshaling additional property %q: %w", key, err)
+			}
+			extra[key] = raw
+		}
+		deleteDeclaredProperties(extra, []string{ {{ range $i, $n := declaredJSONNames $ $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
+		if len(extra) > 0 {
+			encoded, err := json.Marshal(extra)
+			if err != nil {
+				return nil, err
+			}
+			if members, err = mergeObjectMembers(members, encoded); err != nil {
+				return nil, err
+			}
+		}
 	}
-	return append(merged, encoded[1:]...), nil
+{{ end }}	return encodeObject(members)
 }
 
-// UnmarshalJSON implements json.Unmarshaler for {{ $typeName }}, collecting
-// properties the schema does not declare into {{ .Name }}.
-func (t *{{ $typeName }}) UnmarshalJSON(data []byte) error {
-	type shadow {{ $typeName }}
-	t.{{ .Name }} = nil
+{{ if $embeds }}// UnmarshalJSON implements json.Unmarshaler for {{ $typeName }}, decoding the
+// embedded types and the struct's own fields from the same object{{ if $catchAll }}, then
+// collecting properties the schema does not declare into {{ $catchAll.Name }}{{ end }}.
+{{ else }}// UnmarshalJSON implements json.Unmarshaler for {{ $typeName }}, collecting
+// properties the schema does not declare into {{ $catchAll.Name }}.
+{{ end }}func (t *{{ $typeName }}) UnmarshalJSON(data []byte) error {
+{{ if $embeds }}{{ range $embeds }}	if err := json.Unmarshal(data, &t.{{ fieldGoName . }}); err != nil {
+		return err
+	}
+{{ end }}{{ if $plain }}	own := struct {
+{{ range $plain }}{{ if .Embedded }}		{{ .Type }}
+{{ else }}		{{ .Name }} {{ .Type }} `{{ fieldTag . }}`
+{{ end }}{{ end }}	}{
+{{ range $plain }}		{{ fieldGoName . }}: t.{{ fieldGoName . }},
+{{ end }}	}
+	if err := json.Unmarshal(data, &own); err != nil {
+		return err
+	}
+{{ range $plain }}	t.{{ fieldGoName . }} = own.{{ fieldGoName . }}
+{{ end }}{{ end }}{{ else }}	type shadow {{ $typeName }}
 	if err := json.Unmarshal(data, (*shadow)(t)); err != nil {
 		return err
 	}
-
+{{ end }}{{ with $catchAll }}	t.{{ .Name }} = nil
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(data, &obj); err != nil {
 		return err
 	}
 	deleteDeclaredProperties(obj, []string{ {{ range $i, $n := declaredJSONNames $ $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
-	if len(obj) == 0 {
-		return nil
-	}
-	t.{{ .Name }} = make({{ .Type }}, len(obj))
-	for key, raw := range obj {
-		var value {{ catchAllValueType . }}
-		// A property that is both undeclared and not of the type the schema gives
-		// additionalProperties is the least useful thing in the payload, so it is
-		// dropped rather than failing the decode of everything alongside it.
-		if err := json.Unmarshal(raw, &value); err != nil {
-			continue
+	if len(obj) > 0 {
+		t.{{ .Name }} = make({{ .Type }}, len(obj))
+		for key, raw := range obj {
+			var value {{ catchAllValueType . }}
+			// A property that is both undeclared and not of the type the schema gives
+			// additionalProperties is the least useful thing in the payload, so it is
+			// dropped rather than failing the decode of everything alongside it.
+			if err := json.Unmarshal(raw, &value); err != nil {
+				continue
+			}
+			t.{{ .Name }}[key] = value
 		}
-		t.{{ .Name }}[key] = value
+		if len(t.{{ .Name }}) == 0 {
+			t.{{ .Name }} = nil
+		}
 	}
-	if len(t.{{ .Name }}) == 0 {
-		t.{{ .Name }} = nil
+{{ end }}{{ if $embeds }}{{ with embeddedCatchAlls $ $td }}{{ if $catchAll }}	// The embedded unmarshalers ran on the full object, so their catch-alls hold
+	// this type's declared fields and the extras collected above; clear them.
+{{ range . }}{{ if .Guard }}	if {{ .Guard }} {
+		t.{{ .Path }} = nil
 	}
-	return nil
+{{ else }}	t.{{ .Path }} = nil
+{{ end }}{{ end }}{{ else }}	// The embedded unmarshalers ran on the full object, so their catch-alls also
+	// collected this type's declared fields; only true extras belong there.
+{{ range . }}{{ if .Guard }}	if {{ .Guard }} {
+		deleteDeclaredProperties(t.{{ .Path }}, []string{ {{ range $i, $n := declaredJSONNames $ $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
+	}
+{{ else }}	deleteDeclaredProperties(t.{{ .Path }}, []string{ {{ range $i, $n := declaredJSONNames $ $td }}{{ if $i }}, {{ end }}{{ printf "%q" $n }}{{ end }} })
+{{ end }}{{ end }}{{ end }}{{ end }}{{ end }}	return nil
 }
 {{ end }}
 {{ else if eq .Kind 1 }}{{ if $typeDoc }}{{ $typeDoc }}

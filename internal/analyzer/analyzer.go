@@ -93,7 +93,6 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 	// a struct may only do it through an indirection.
 	breakAliasCycles(pkg.Types)
 	breakStructCycles(pkg.Types)
-	dropShadowedCatchAlls(pkg.Types)
 
 	// Detect paginated operations.
 	a.detectPagination(pkg)

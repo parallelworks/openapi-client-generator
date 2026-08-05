@@ -33,6 +33,11 @@ func FuncMap() template.FuncMap {
 		"catchAllValueType":       catchAllValueType,
 		"declaredJSONNames":       declaredJSONNames,
 		"hasCatchAllTypes":        hasCatchAllTypes,
+		"marshalerEmbeds":         marshalerEmbeds,
+		"plainFields":             plainFields,
+		"fieldGoName":             fieldGoName,
+		"embeddedCatchAlls":       embeddedCatchAlls,
+		"hasMarshalerEmbeds":      hasMarshalerEmbeds,
 		"discriminatorFieldName":  discriminatorFieldName,
 		"hasPaginatedOps":         hasPaginatedOps,
 		"paginationItemType":      paginationItemType,
@@ -258,6 +263,155 @@ func declaredJSONNames(pkg *ir.Package, td *ir.TypeDef) []string {
 func hasCatchAllTypes(types []*ir.TypeDef) bool {
 	return slices.ContainsFunc(types, func(td *ir.TypeDef) bool {
 		return catchAllField(td) != nil
+	})
+}
+
+// terminalTypeName resolves a Go type expression to the named type it denotes,
+// following aliases, or "" for builtins and composites.
+func terminalTypeName(byName map[string]*ir.TypeDef, goType string) string {
+	name := ir.NamedType(strings.TrimPrefix(goType, "*"))
+	for range len(byName) + 1 {
+		td := byName[name]
+		if td == nil || td.Kind != ir.TypeKindAlias {
+			return name
+		}
+		next := ir.NamedType(strings.TrimPrefix(td.GoType, "*"))
+		if next == "" {
+			return ""
+		}
+		name = next
+	}
+	return name
+}
+
+// customMarshalerTypes returns the names of generated types whose method set
+// carries MarshalJSON/UnmarshalJSON: unions, structs with a catch-all, and
+// structs that embed such a type and so inherit the methods by promotion.
+func customMarshalerTypes(pkg *ir.Package) map[string]bool {
+	byName := ir.TypesByName(pkg.Types)
+	bearing := make(map[string]bool)
+	for _, td := range pkg.Types {
+		if td == nil {
+			continue
+		}
+		if td.Kind == ir.TypeKindUnion || catchAllField(td) != nil {
+			bearing[td.Name] = true
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, td := range pkg.Types {
+			if td == nil || td.Kind != ir.TypeKindStruct || bearing[td.Name] {
+				continue
+			}
+			for _, f := range td.Fields {
+				if f.Embedded && bearing[terminalTypeName(byName, f.Type)] {
+					bearing[td.Name] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	return bearing
+}
+
+// marshalerEmbeds returns the embedded fields whose types carry custom JSON
+// marshalers, which the enclosing struct must encode part by part: handing the
+// whole struct to encoding/json would promote those methods and let one
+// embedded type speak for the entire object. A struct whose single field is
+// such an embed has nothing of its own to lose to promotion, so it gets none.
+func marshalerEmbeds(pkg *ir.Package, td *ir.TypeDef) []*ir.Field {
+	if td.Kind != ir.TypeKindStruct || len(td.Fields) < 2 {
+		return nil
+	}
+	byName := ir.TypesByName(pkg.Types)
+	bearing := customMarshalerTypes(pkg)
+	var embeds []*ir.Field
+	for _, f := range td.Fields {
+		if f.Embedded && bearing[terminalTypeName(byName, f.Type)] {
+			embeds = append(embeds, f)
+		}
+	}
+	return embeds
+}
+
+// plainFields returns the fields a part-wise marshaled struct encodes directly:
+// everything except the catch-all and the marshaler-bearing embeds.
+func plainFields(pkg *ir.Package, td *ir.TypeDef) []*ir.Field {
+	skip := make(map[*ir.Field]bool)
+	for _, f := range marshalerEmbeds(pkg, td) {
+		skip[f] = true
+	}
+	var fields []*ir.Field
+	for _, f := range td.Fields {
+		if !f.CatchAll && !skip[f] {
+			fields = append(fields, f)
+		}
+	}
+	return fields
+}
+
+// fieldGoName returns the name a field is selected by: for an embedded field
+// that is the type name, with any pointer indirection stripped.
+func fieldGoName(f *ir.Field) string {
+	if f.Embedded {
+		return strings.TrimPrefix(f.Type, "*")
+	}
+	return f.Name
+}
+
+// EmbeddedCatchAll locates a catch-all map inside an embedded type: the Go
+// selector path from the enclosing struct, and the nil checks any pointers on
+// that path require.
+type EmbeddedCatchAll struct {
+	Guard string
+	Path  string
+}
+
+// embeddedCatchAlls returns the catch-all maps reachable through a struct's
+// embedded types, which the enclosing type's UnmarshalJSON has to clean up
+// after the embedded unmarshalers have run.
+func embeddedCatchAlls(pkg *ir.Package, td *ir.TypeDef) []EmbeddedCatchAll {
+	byName := ir.TypesByName(pkg.Types)
+
+	var found []EmbeddedCatchAll
+	seen := map[string]bool{td.Name: true}
+	var walk func(td *ir.TypeDef, path, guard string)
+	walk = func(td *ir.TypeDef, path, guard string) {
+		for _, f := range td.Fields {
+			if !f.Embedded {
+				continue
+			}
+			embedded := ir.StructNamed(byName, strings.TrimPrefix(f.Type, "*"))
+			if embedded == nil || seen[embedded.Name] {
+				continue
+			}
+			fieldPath := path + fieldGoName(f)
+			fieldGuard := guard
+			if strings.HasPrefix(f.Type, "*") {
+				if fieldGuard != "" {
+					fieldGuard += " && "
+				}
+				fieldGuard += "t." + fieldPath + " != nil"
+			}
+			if ca := catchAllField(embedded); ca != nil {
+				found = append(found, EmbeddedCatchAll{Guard: fieldGuard, Path: fieldPath + "." + ca.Name})
+			}
+			seen[embedded.Name] = true
+			walk(embedded, fieldPath+".", fieldGuard)
+			delete(seen, embedded.Name)
+		}
+	}
+	walk(td, "", "")
+	return found
+}
+
+// hasMarshalerEmbeds reports whether any struct needs part-wise marshalers,
+// which is what pulls the JSON object merge helpers into the generated types.
+func hasMarshalerEmbeds(pkg *ir.Package) bool {
+	return slices.ContainsFunc(pkg.Types, func(td *ir.TypeDef) bool {
+		return td != nil && len(marshalerEmbeds(pkg, td)) > 0
 	})
 }
 
