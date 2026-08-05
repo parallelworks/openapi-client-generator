@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.4...v0.2.5) (2026-08-05)
+
+
+### Bug Fixes
+
+* valid specs lose data, duplicate keys, or fail to compile ([#47](https://github.com/parallelworks/openapi-client-generator/issues/47)) ([99ef133](https://github.com/parallelworks/openapi-client-generator/commit/99ef133d8c9e0f5eea6b1a11a37cce6c42e79f53))
+
 ## [0.2.4](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.3...v0.2.4) (2026-08-04)
 
 
