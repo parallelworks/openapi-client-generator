@@ -1,13 +1,8 @@
 package generator
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
+	"strings"
 	"testing"
-
-	"github.com/parallelworks/openapi-client-generator/internal/analyzer"
-	"github.com/parallelworks/openapi-client-generator/internal/parser"
 )
 
 const additionalPropertiesSpec = `openapi: 3.1.0
@@ -38,49 +33,14 @@ components:
         owner: { type: string }
       additionalProperties:
         type: string
+    Sealed:
+      type: object
+      properties:
+        only: { type: string }
+      additionalProperties: false
 `
 
-// TestE2E_AdditionalPropertiesRoundTrip generates a client for schemas that mix
-// declared properties with additionalProperties, then compiles and RUNS a test
-// proving unknown keys survive an unmarshal/marshal round trip instead of being
-// dropped or emitted under a literal "-" key.
-func TestE2E_AdditionalPropertiesRoundTrip(t *testing.T) {
-	specDir := t.TempDir()
-	specPath := filepath.Join(specDir, "spec.yaml")
-	if err := os.WriteFile(specPath, []byte(additionalPropertiesSpec), 0o644); err != nil {
-		t.Fatalf("writing spec: %v", err)
-	}
-
-	result, err := parser.Parse(specPath, parser.Config{})
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-
-	a := analyzer.New(result.Model)
-	pkg, err := a.Analyze("petsapi")
-	if err != nil {
-		t.Fatalf("Analyze: %v", err)
-	}
-
-	gen, err := New(pkg)
-	if err != nil {
-		t.Fatalf("New generator: %v", err)
-	}
-	files, err := gen.Generate()
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-
-	tmpDir := t.TempDir()
-	goMod := []byte("module additionalprops-e2e-test\n\ngo 1.25.5\n")
-	if err := os.WriteFile(filepath.Join(tmpDir, "go.mod"), goMod, 0o644); err != nil {
-		t.Fatalf("writing go.mod: %v", err)
-	}
-	if err := WriteFiles(tmpDir, files); err != nil {
-		t.Fatalf("WriteFiles: %v", err)
-	}
-
-	runtimeTest := []byte(`package petsapi
+const additionalPropertiesRuntimeTest = `package petsapi
 
 import (
 	"encoding/json"
@@ -131,6 +91,45 @@ func TestUnknownKeysSurviveRoundTrip(t *testing.T) {
 	}
 }
 
+// encoding/json falls back to a case-insensitive tag match, so a differently
+// cased declared property must not also be collected as an unknown one -- that
+// would emit the same property twice on the way back out.
+func TestDifferentlyCasedDeclaredPropertyIsNotDuplicated(t *testing.T) {
+	var p Pet
+	if err := json.Unmarshal([]byte(` + "`" + `{"Name":"rex","extra":1}` + "`" + `), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.Name != "rex" {
+		t.Errorf("Name = %q, want rex", p.Name)
+	}
+	if _, ok := p.AdditionalProperties["Name"]; ok {
+		t.Fatalf("declared property leaked into AdditionalProperties: %v", p.AdditionalProperties)
+	}
+
+	out, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("re-unmarshal: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("round trip = %s, want exactly name and extra", out)
+	}
+}
+
+// A decode must not carry over values from a previous one.
+func TestDecodeResetsAdditionalProperties(t *testing.T) {
+	p := Pet{AdditionalProperties: map[string]any{"stale": true}}
+	if err := json.Unmarshal([]byte(` + "`" + `{"name":"rex","fresh":1}` + "`" + `), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := p.AdditionalProperties["stale"]; ok {
+		t.Errorf("stale additional property survived: %v", p.AdditionalProperties)
+	}
+}
+
 func TestTypedAdditionalProperties(t *testing.T) {
 	var l Labels
 	if err := json.Unmarshal([]byte(` + "`" + `{"owner":"me","env":"prod"}` + "`" + `), &l); err != nil {
@@ -161,16 +160,34 @@ func TestEmptyAdditionalPropertiesOmitsNothingExtra(t *testing.T) {
 		t.Errorf("marshal = %s, want {\"name\":\"rex\"}", out)
 	}
 }
-`)
-	if err := os.WriteFile(filepath.Join(tmpDir, "additional_properties_test.go"), runtimeTest, 0o644); err != nil {
-		t.Fatalf("writing runtime test: %v", err)
-	}
+`
 
-	cmd := exec.Command("go", "test", "./...")
-	cmd.Dir = tmpDir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("go test on generated code failed: %v\n%s", err, string(output))
+// TestE2E_AdditionalPropertiesRoundTrip generates a client for schemas that mix
+// declared properties with additionalProperties, then compiles and RUNS a test
+// proving unknown keys survive an unmarshal/marshal round trip instead of being
+// dropped or emitted under a literal "-" key.
+func TestE2E_AdditionalPropertiesRoundTrip(t *testing.T) {
+	files, _ := generateFromSpec(t, additionalPropertiesSpec, "petsapi")
+	runGeneratedWireTest(t, files, "additionalprops", additionalPropertiesRuntimeTest)
+}
+
+// additionalProperties: false forbids unknown properties, so no catch-all field
+// (and no custom marshalers) may be generated for such a schema.
+func TestE2E_AdditionalPropertiesFalseHasNoCatchAll(t *testing.T) {
+	files, _ := generateFromSpec(t, additionalPropertiesSpec, "petsapi")
+
+	var types string
+	for _, f := range files {
+		if f.Name == "types.go" {
+			types = string(f.Content)
+		}
 	}
-	t.Logf("additionalProperties round trip test passed:\n%s", string(output))
+	sealed := types[strings.Index(types, "type Sealed struct"):]
+	sealed = sealed[:strings.Index(sealed, "\n}")]
+	if strings.Contains(sealed, "AdditionalProperties") {
+		t.Errorf("Sealed got a catch-all field despite additionalProperties: false:\n%s", sealed)
+	}
+	if strings.Contains(types, "func (t Sealed) MarshalJSON") {
+		t.Error("Sealed got additionalProperties marshalers despite additionalProperties: false")
+	}
 }

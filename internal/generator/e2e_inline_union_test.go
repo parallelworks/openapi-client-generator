@@ -135,6 +135,25 @@ func TestUnknownVariantDoesNotFailSiblings(t *testing.T) {
 		t.Error("shapes[b] should be an unknown variant")
 	}
 }
+
+// A payload with no discriminator at all identifies nothing, so it must stay an
+// error rather than masquerading as an unknown variant.
+func TestMissingDiscriminatorIsAnError(t *testing.T) {
+	var v ShapeCollectionShapesValue
+	if err := json.Unmarshal([]byte(` + "`" + `{"radius":2.5}` + "`" + `), &v); err == nil {
+		t.Fatal("expected an error for a payload with no shapeType, got nil")
+	}
+}
+
+func TestNullUnionDecodesToTheZeroValue(t *testing.T) {
+	var v ShapeCollectionShapesValue
+	if err := json.Unmarshal([]byte("null"), &v); err != nil {
+		t.Fatalf("null should decode as a no-op: %v", err)
+	}
+	if v.Value != nil || v.IsUnknownVariant() {
+		t.Errorf("null produced Value=%v unknown=%v, want the zero union", v.Value, v.IsUnknownVariant())
+	}
+}
 `)
 	if err := os.WriteFile(filepath.Join(tmpDir, "union_runtime_test.go"), runtimeTest, 0o644); err != nil {
 		t.Fatalf("writing runtime test: %v", err)

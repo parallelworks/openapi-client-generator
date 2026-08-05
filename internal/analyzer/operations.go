@@ -92,7 +92,7 @@ func (a *Analyzer) convertOperation(httpMethod, path string, pathItem *v3high.Pa
 
 	// Responses.
 	if op.Responses != nil {
-		a.convertResponses(op.Responses, opDef, name+"Response")
+		a.convertResponses(op.Responses, opDef, name)
 	}
 
 	// Security requirements.
@@ -296,10 +296,17 @@ func (a *Analyzer) convertRequestBody(rb *v3high.RequestBody, nameHint string) (
 }
 
 // convertResponses converts operation responses into the OperationDef fields.
-func (a *Analyzer) convertResponses(responses *v3high.Responses, opDef *ir.OperationDef, nameHint string) {
+func (a *Analyzer) convertResponses(responses *v3high.Responses, opDef *ir.OperationDef, opName string) {
 	if responses.Codes != nil {
 		for code, resp := range responses.Codes.FromOldest() {
-			rd := a.convertSingleResponse(code, resp, nameHint)
+			// Only the success body reaches the method signature, so it keeps the
+			// plain <Op>Response hint; the others carry their status code so two
+			// inline bodies of one operation can't land on the same name.
+			hint := opName + "Response" + code
+			if isSuccessCode(code) && opDef.SuccessResponse == nil {
+				hint = opName + "Response"
+			}
+			rd := a.convertSingleResponse(code, resp, hint)
 			opDef.Responses = append(opDef.Responses, rd)
 
 			if isSuccessCode(code) {
@@ -315,7 +322,7 @@ func (a *Analyzer) convertResponses(responses *v3high.Responses, opDef *ir.Opera
 
 	// Handle the default response.
 	if responses.Default != nil {
-		rd := a.convertSingleResponse("default", responses.Default, nameHint)
+		rd := a.convertSingleResponse("default", responses.Default, opName+"DefaultResponse")
 		rd.IsError = true
 		opDef.Responses = append(opDef.Responses, rd)
 		opDef.ErrorResponses = append(opDef.ErrorResponses, rd)
