@@ -13,8 +13,8 @@ import (
 )
 
 // generateAndBuild generates a client for spec, builds it, and returns the
-// compiler output ("" when it built) alongside types.go.
-func generateAndBuild(t *testing.T, spec string) (buildOutput, types string) {
+// compiler output ("" when it built) alongside the generated files by name.
+func generateAndBuild(t *testing.T, spec string) (buildOutput string, generated map[string]string) {
 	t.Helper()
 
 	specPath := filepath.Join(t.TempDir(), "spec.yaml")
@@ -52,12 +52,11 @@ func generateAndBuild(t *testing.T, spec string) (buildOutput, types string) {
 	if err == nil {
 		out = nil
 	}
+	generated = make(map[string]string, len(files))
 	for _, f := range files {
-		if f.Name == "types.go" {
-			types = string(f.Content)
-		}
+		generated[f.Name] = string(f.Content)
 	}
-	return string(out), types
+	return string(out), generated
 }
 
 // TestE2E_SchemaNamedLikeGeneratedType checks that a schema whose name matches
@@ -66,7 +65,7 @@ func generateAndBuild(t *testing.T, spec string) (buildOutput, types string) {
 func TestE2E_SchemaNamedLikeGeneratedType(t *testing.T) {
 	for _, name := range templates.ReservedIdentifiers {
 		t.Run(name, func(t *testing.T) {
-			build, types := generateAndBuild(t, `openapi: 3.1.0
+			build, files := generateAndBuild(t, `openapi: 3.1.0
 info: { title: t, version: "1" }
 paths:
   /u:
@@ -93,7 +92,7 @@ components:
 			if build != "" {
 				t.Errorf("a schema named %q does not compile:\n%s", name, build)
 			}
-			if !strings.Contains(types, "type "+name+"2 struct") {
+			if types := files["types.go"]; !strings.Contains(types, "type "+name+"2 struct") {
 				t.Errorf("schema %q was not renamed out of the way:\n%s", name, types)
 			}
 		})
@@ -105,7 +104,7 @@ components:
 // schemas that differ only in punctuation share one exported spelling, so the
 // second is renamed — and a forward reference used to silently point at the first.
 func TestE2E_ForwardReferenceUsesTheRenamedType(t *testing.T) {
-	build, types := generateAndBuild(t, `openapi: 3.1.0
+	build, files := generateAndBuild(t, `openapi: 3.1.0
 info: { title: t, version: "1" }
 paths: {}
 components:
@@ -125,6 +124,7 @@ components:
 	if build != "" {
 		t.Fatalf("generated client does not compile:\n%s", build)
 	}
+	types := files["types.go"]
 	if !strings.Contains(types, "A *FooBar `") {
 		t.Errorf("Holder.a does not reference FooBar:\n%s", types)
 	}

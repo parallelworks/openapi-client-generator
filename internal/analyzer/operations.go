@@ -312,20 +312,20 @@ func effectiveStyleExplode(param *v3high.Parameter) (string, bool) {
 
 // convertRequestBody converts an OpenAPI request body to an ir.RequestBodyDef.
 func (a *Analyzer) convertRequestBody(rb *v3high.RequestBody, nameHint string) (*ir.RequestBodyDef, error) {
-	def := &ir.RequestBodyDef{
-		Required:    rb.Required != nil && *rb.Required,
-		Description: rb.Description,
-	}
-
 	// The chosen content type decides how the body is encoded on the wire.
 	contentType, mediaType := preferredContent(rb.Content)
 	if contentType == "" {
-		return def, nil
+		// The spec declares a body but no content to put in it, so there is
+		// nothing for the caller to pass and no type to pass it as.
+		return nil, nil
 	}
-	def.ContentType = contentType
-	def.TypeName = rawBodyType(contentType, a.resolveMediaTypeSchema(mediaType, nameHint))
 
-	return def, nil
+	return &ir.RequestBodyDef{
+		Required:    rb.Required != nil && *rb.Required,
+		Description: rb.Description,
+		ContentType: contentType,
+		TypeName:    bodyGoType(contentType, a.resolveMediaTypeSchema(mediaType, nameHint)),
+	}, nil
 }
 
 // structuredContentType reports whether the generated client can encode a Go
@@ -336,13 +336,15 @@ func structuredContentType(contentType string) bool {
 		strings.HasPrefix(contentType, "application/x-www-form-urlencoded")
 }
 
-// rawBodyType keeps a body the client cannot structurally encode — XML, say —
-// out of a generated struct it would have no encoder for. Handing the caller
-// []byte (or a string for text) says what the client can actually send, rather
-// than accepting a struct and marshaling it as JSON under a media type that
-// promises something else.
-func rawBodyType(contentType, typeName string) string {
-	if typeName == "" || structuredContentType(contentType) {
+// bodyGoType is the Go type a request body is accepted as. A body the client
+// cannot structurally encode — XML, say — is taken as the bytes or text it
+// already is rather than as a struct there would be no encoder for, and a body
+// the spec declares without a schema still needs some type to be passed as.
+func bodyGoType(contentType, typeName string) string {
+	if structuredContentType(contentType) {
+		if typeName == "" {
+			return "any"
+		}
 		return typeName
 	}
 	switch typeName {

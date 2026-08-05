@@ -230,7 +230,24 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 		}
 	}
 
+	a.addCatchAllField(td, schema, goName)
+
 	return td, nil
+}
+
+// addCatchAllField gives a struct the synthetic field that holds whatever the
+// schema does not declare, when the schema admits such properties at all.
+func (a *Analyzer) addCatchAllField(td *ir.TypeDef, schema *highbase.Schema, goName string) {
+	if !allowsAdditionalProperties(schema) {
+		return
+	}
+	td.Fields = append(td.Fields, &ir.Field{
+		Name:        catchAllFieldName(td.Fields),
+		JSONName:    "-",
+		Type:        "map[string]" + a.resolveAdditionalPropertiesType(schema, goName),
+		Description: "Properties not defined by the schema.",
+		CatchAll:    true,
+	})
 }
 
 // convertProperty converts one object property into a struct field. multipartBody
@@ -405,19 +422,9 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 		td.Fields = append(td.Fields, a.convertProperty(goName, propName, propSchema, requiredSet[propName], multipartBody))
 	}
 
-	// If the object has both properties and additionalProperties, add an extra field.
-	// The generator gives such structs MarshalJSON/UnmarshalJSON so the map is
-	// inlined into the object rather than nested under a key of its own.
-	if allowsAdditionalProperties(schema) {
-		mapValueType := a.resolveAdditionalPropertiesType(schema, goName)
-		td.Fields = append(td.Fields, &ir.Field{
-			Name:        catchAllFieldName(td.Fields),
-			JSONName:    "-",
-			Type:        "map[string]" + mapValueType,
-			Description: "Properties not defined by the schema.",
-			CatchAll:    true,
-		})
-	}
+	// The generator gives a struct with a catch-all MarshalJSON/UnmarshalJSON so
+	// the map is inlined into the object rather than nested under a key of its own.
+	a.addCatchAllField(td, schema, goName)
 
 	return td, nil
 }

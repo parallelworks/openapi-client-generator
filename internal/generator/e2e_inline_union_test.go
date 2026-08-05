@@ -145,6 +145,45 @@ func TestMissingDiscriminatorIsAnError(t *testing.T) {
 	}
 }
 
+// A union must stay comparable: it is an ordinary field of the structs that hold
+// it, so storing the preserved raw payload in a slice would make every one of
+// those structs uncomparable too -- a compile error for consumers.
+func TestUnionIsComparable(t *testing.T) {
+	var a, b ShapeCollectionShapesValue
+	if a != b {
+		t.Error("zero unions should be equal")
+	}
+	if !map[ShapeCollectionShapesValue]bool{a: true}[b] {
+		t.Error("a union should be usable as a map key")
+	}
+}
+
+func TestUnknownVariantRawIsACopy(t *testing.T) {
+	payload := []byte("{\"shapeType\":\"hexagon\",\"sides\":6}")
+	var v ShapeCollectionShapesValue
+	if err := json.Unmarshal(payload, &v); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	raw := v.Raw()
+	if len(raw) == 0 {
+		t.Fatal("Raw() lost the unrecognized payload")
+	}
+	raw[0] = 'X'
+	if again := v.Raw(); again[0] == 'X' {
+		t.Error("Raw() aliases the union's own buffer")
+	}
+}
+
+func TestKnownVariantHasNoRaw(t *testing.T) {
+	var v ShapeCollectionShapesValue
+	if err := json.Unmarshal([]byte("{\"shapeType\":\"circle\",\"radius\":1}"), &v); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if v.Raw() != nil {
+		t.Errorf("Raw() = %s, want nil for a recognized variant", v.Raw())
+	}
+}
+
 func TestNullUnionDecodesToTheZeroValue(t *testing.T) {
 	var v ShapeCollectionShapesValue
 	if err := json.Unmarshal([]byte("null"), &v); err != nil {

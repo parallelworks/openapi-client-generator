@@ -222,15 +222,44 @@ func catchAllValueType(f *ir.Field) string {
 	return strings.TrimPrefix(f.Type, "map[string]")
 }
 
-func declaredJSONNames(td *ir.TypeDef) []string {
+// declaredJSONNames returns the wire names a struct already consumes into
+// fields, an embedded type's included: those are promoted onto the struct, so a
+// catch-all that re-collected them would emit each one twice.
+func declaredJSONNames(pkg *ir.Package, td *ir.TypeDef) []string {
 	var names []string
-	for _, f := range td.Fields {
-		if f.CatchAll || f.Embedded || f.JSONName == "" || f.JSONName == "-" {
-			continue
+	visited := make(map[string]bool)
+
+	var walk func(td *ir.TypeDef)
+	walk = func(td *ir.TypeDef) {
+		if td == nil || visited[td.Name] {
+			return
 		}
-		names = append(names, f.JSONName)
+		visited[td.Name] = true
+		for _, f := range td.Fields {
+			switch {
+			case f.CatchAll:
+			case f.Embedded:
+				walk(structByName(pkg, f.Type))
+			case f.JSONName == "" || f.JSONName == "-":
+			default:
+				names = append(names, f.JSONName)
+			}
+		}
 	}
+	walk(td)
 	return names
+}
+
+// structByName returns the generated struct of the given Go type, which may be
+// written as a pointer where an indirection broke a reference cycle.
+func structByName(pkg *ir.Package, goType string) *ir.TypeDef {
+	goType = strings.TrimPrefix(goType, "*")
+	for _, td := range pkg.Types {
+		if td.Name == goType && td.Kind == ir.TypeKindStruct {
+			return td
+		}
+	}
+	return nil
 }
 
 func hasCatchAllTypes(types []*ir.TypeDef) bool {

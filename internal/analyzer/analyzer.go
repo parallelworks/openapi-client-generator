@@ -85,8 +85,11 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 	// Append union types synthesized for inline oneOf/anyOf schemas.
 	pkg.Types = append(pkg.Types, a.synthesized...)
 
-	// A spec is free to define a type in terms of itself; Go aliases are not.
+	// A spec is free to define a type in terms of itself; Go aliases are not, and
+	// a struct may only do it through an indirection.
 	breakAliasCycles(pkg.Types)
+	breakStructCycles(pkg.Types)
+	dropShadowedCatchAlls(pkg.Types)
 
 	// Detect paginated operations.
 	a.detectPagination(pkg)
