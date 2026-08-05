@@ -36,16 +36,17 @@ func NewClient(baseURL string, opts ...ClientOption) *Client {
 	return c
 }
 
-// do executes an HTTP request and decodes the response.
-func (c *Client) do(ctx context.Context, method string, path string, body any, result any, accept string, headers ...http.Header) error {
+// do executes an HTTP request and decodes the response. contentType selects the
+// request body encoding and is sent as the Content-Type header.
+func (c *Client) do(ctx context.Context, method string, path string, body any, contentType string, result any, accept string, headers ...http.Header) error {
 	fullURL := c.baseURL + path
 
-	var jsonBody []byte
+	var payload []byte
 	if body != nil {
 		var err error
-		jsonBody, err = json.Marshal(body)
+		payload, contentType, err = encodeRequestBody(body, contentType)
 		if err != nil {
-			return fmt.Errorf("encoding request body: %w", err)
+			return err
 		}
 	}
 
@@ -75,8 +76,8 @@ func (c *Client) do(ctx context.Context, method string, path string, body any, r
 		}
 
 		var bodyReader io.Reader
-		if jsonBody != nil {
-			bodyReader = bytes.NewReader(jsonBody)
+		if payload != nil {
+			bodyReader = bytes.NewReader(payload)
 		}
 
 		req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
@@ -84,10 +85,10 @@ func (c *Client) do(ctx context.Context, method string, path string, body any, r
 			return fmt.Errorf("creating request: %w", err)
 		}
 
-		if jsonBody != nil {
-			req.Header.Set("Content-Type", "application/json")
+		if payload != nil {
+			req.Header.Set("Content-Type", contentType)
 			// Set GetBody so request body can be re-read on retries.
-			bodyBytes := jsonBody
+			bodyBytes := payload
 			req.GetBody = func() (io.ReadCloser, error) {
 				return io.NopCloser(bytes.NewReader(bodyBytes)), nil
 			}

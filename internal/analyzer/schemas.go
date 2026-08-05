@@ -23,9 +23,24 @@ func (a *Analyzer) convertSchema(goName, specName string, schema *highbase.Schem
 		return a.convertEnum(goName, schema, nullable)
 	}
 
+	// A oneOf/anyOf whose only other member is `type: null` is how OpenAPI 3.1
+	// spells "nullable T"; it offers no choice to model, so generate T itself.
+	if variant, ok := nullableUnionVariant(schema); ok {
+		return a.convertNullableUnion(goName, specName, schema, variant)
+	}
+	if goType, ok := a.uniformUnionGoType(schema, goName); ok {
+		return &ir.TypeDef{
+			Name:        goName,
+			Description: schema.Description,
+			Kind:        ir.TypeKindAlias,
+			GoType:      goType,
+			IsNullable:  nullable,
+		}, nil
+	}
+
 	// Composition types: allOf, oneOf, anyOf.
 	if len(schema.AllOf) > 0 {
-		return a.convertAllOf(goName, schema, nullable)
+		return a.convertAllOf(goName, schema, nullable, a.multipartBodies[specName])
 	}
 	if len(schema.OneOf) > 0 {
 		return a.convertOneOf(goName, schema, nullable)
@@ -38,7 +53,7 @@ func (a *Analyzer) convertSchema(goName, specName string, schema *highbase.Schem
 
 	switch primaryType {
 	case "object":
-		return a.convertObject(goName, schema, nullable)
+		return a.convertObject(goName, schema, nullable, a.multipartBodies[specName])
 	case "array":
 		return a.convertArray(goName, schema, nullable)
 	case "string", "integer", "number", "boolean":
@@ -94,7 +109,7 @@ func (a *Analyzer) convertEnum(goName string, schema *highbase.Schema, nullable 
 		// Unique keeps the const unique against package types/other consts —
 		// two values that sanitize to the same identifier ("a-b"/"a b"), or a const
 		// that matches a schema-named type, would otherwise fail to compile.
-		constName := a.namer.Unique(naming.Exported(goName + " " + raw))
+		constName := a.namer.Unique(enumConstName(goName, raw))
 		td.EnumValues = append(td.EnumValues, &ir.EnumVal{
 			Name:    constName,
 			Literal: literal,
@@ -155,7 +170,7 @@ func enumConstLiteral(goType, raw string) (string, bool) {
 
 // convertAllOf creates a struct TypeDef from an allOf composition.
 // $ref entries become embedded fields; inline schemas have their properties merged.
-func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable bool) (*ir.TypeDef, error) {
+func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable, multipartBody bool) (*ir.TypeDef, error) {
 	td := &ir.TypeDef{
 		Name:        goName,
 		Description: schema.Description,
@@ -175,10 +190,7 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 
 		if refName != "" {
 			// $ref to a known component schema: add as embedded field.
-			goTypeName := naming.Exported(refName)
-			if td, ok := a.typesBySchema[refName]; ok {
-				goTypeName = td.Name
-			}
+			goTypeName := a.goTypeForSchemaName(refName)
 			td.Fields = append(td.Fields, &ir.Field{
 				Name:     goTypeName,
 				Type:     goTypeName,
@@ -214,32 +226,42 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 				continue
 			}
 
-			required := requiredSet[propName]
-			propNullable := isNullable(propSchema)
-			goType := a.resolveGoType(propSchema, goName+naming.Exported(propName))
-			isPointer := !required || propNullable
-
-			if isPointer && goType != "any" && !isSliceType(goType) && !isMapType(goType) {
-				goType = "*" + goType
-			}
-
-			td.Fields = append(td.Fields, &ir.Field{
-				Name:                naming.Exported(propName),
-				JSONName:            propName,
-				Type:                goType,
-				Description:         propSchema.Description,
-				Required:            required,
-				IsPointer:           isPointer,
-				OmitEmpty:           !required,
-				Deprecated:          propSchema.Deprecated != nil && *propSchema.Deprecated,
-				ReadOnly:            propSchema.ReadOnly != nil && *propSchema.ReadOnly,
-				WriteOnly:           propSchema.WriteOnly != nil && *propSchema.WriteOnly,
-				PrimaryErrorMessage: isPrimaryErrorMessage(propSchema),
-			})
+			td.Fields = append(td.Fields, a.convertProperty(goName, propName, propSchema, requiredSet[propName], multipartBody))
 		}
 	}
 
 	return td, nil
+}
+
+// convertProperty converts one object property into a struct field. multipartBody
+// marks a schema sent as multipart form data, whose binary properties are file
+// parts rather than byte slices.
+func (a *Analyzer) convertProperty(goName, propName string, propSchema *highbase.Schema, required, multipartBody bool) *ir.Field {
+	goType := a.resolveGoType(propSchema, goName+naming.Exported(propName))
+	if multipartBody {
+		if fileType, ok := formFileType(propSchema); ok {
+			goType = fileType
+		}
+	}
+
+	isPointer := !required || isNullable(propSchema)
+	if isPointer && goType != "any" && !isSliceType(goType) && !isMapType(goType) {
+		goType = "*" + goType
+	}
+
+	return &ir.Field{
+		Name:                naming.Exported(propName),
+		JSONName:            propName,
+		Type:                goType,
+		Description:         propSchema.Description,
+		Required:            required,
+		IsPointer:           isPointer,
+		OmitEmpty:           !required,
+		Deprecated:          propSchema.Deprecated != nil && *propSchema.Deprecated,
+		ReadOnly:            propSchema.ReadOnly != nil && *propSchema.ReadOnly,
+		WriteOnly:           propSchema.WriteOnly != nil && *propSchema.WriteOnly,
+		PrimaryErrorMessage: isPrimaryErrorMessage(propSchema),
+	}
 }
 
 // isPrimaryErrorMessage reports whether a property schema carries Kiota's
@@ -292,12 +314,7 @@ func (a *Analyzer) convertUnion(goName string, schema *highbase.Schema, variants
 			discMapping = make(map[string]string)
 			for k, v := range schema.Discriminator.Mapping.FromOldest() {
 				// v is a $ref like "#/components/schemas/Circle"
-				refName := refToSchemaName(v)
-				goTypeName := naming.Exported(refName)
-				if existing, ok := a.typesBySchema[refName]; ok {
-					goTypeName = existing.Name
-				}
-				td.Discriminator.Mapping[k] = goTypeName
+				td.Discriminator.Mapping[k] = a.goTypeForSchemaName(refToSchemaName(v))
 				discMapping[v] = k
 			}
 		}
@@ -312,29 +329,29 @@ func (a *Analyzer) convertUnion(goName string, schema *highbase.Schema, variants
 				if refName == "" {
 					continue
 				}
-				goTypeName := naming.Exported(refName)
-				if existing, ok := a.typesBySchema[refName]; ok {
-					goTypeName = existing.Name
-				}
-				td.Discriminator.Mapping[refName] = goTypeName
+				td.Discriminator.Mapping[refName] = a.goTypeForSchemaName(refName)
 				discMapping[ref] = refName
 			}
 		}
 	}
 
 	for _, proxy := range variants {
+		// A `type: null` member says the union is nullable; it is not one of the
+		// shapes the value can take, so it gets no variant of its own.
+		if isNullVariant(proxy) {
+			continue
+		}
+
 		ref := proxy.GetReference()
 		refName := refToSchemaName(ref)
 
-		var typeName string
+		typeName := "any"
 		if refName != "" {
-			typeName = naming.Exported(refName)
-			if existing, ok := a.typesBySchema[refName]; ok {
-				typeName = existing.Name
-			}
-		} else {
-			// Inline variant: use "any" as the type.
-			typeName = "any"
+			typeName = a.goTypeForSchemaName(refName)
+		} else if variantSchema, err := proxy.BuildSchema(); err == nil && variantSchema != nil {
+			// An inline variant still has a Go type; without one it would decode
+			// into nothing and the payloads it covers would fail to unmarshal.
+			typeName = a.resolveGoType(variantSchema, suffixHint(goName, "Variant"))
 		}
 
 		variant := &ir.UnionVariant{
@@ -353,7 +370,7 @@ func (a *Analyzer) convertUnion(goName string, schema *highbase.Schema, variants
 }
 
 // convertObject creates a struct TypeDef from an object schema.
-func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullable bool) (*ir.TypeDef, error) {
+func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullable, multipartBody bool) (*ir.TypeDef, error) {
 	// If no defined properties and additionalProperties is set, generate a map alias.
 	hasProperties := schema.Properties != nil && schema.Properties.Len() > 0
 	if !hasProperties && allowsAdditionalProperties(schema) {
@@ -385,28 +402,7 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 			continue
 		}
 
-		required := requiredSet[propName]
-		propNullable := isNullable(propSchema)
-		goType := a.resolveGoType(propSchema, goName+naming.Exported(propName))
-		isPointer := !required || propNullable
-
-		if isPointer && goType != "any" && !isSliceType(goType) && !isMapType(goType) {
-			goType = "*" + goType
-		}
-
-		td.Fields = append(td.Fields, &ir.Field{
-			Name:                naming.Exported(propName),
-			JSONName:            propName,
-			Type:                goType,
-			Description:         propSchema.Description,
-			Required:            required,
-			IsPointer:           isPointer,
-			OmitEmpty:           !required,
-			Deprecated:          propSchema.Deprecated != nil && *propSchema.Deprecated,
-			ReadOnly:            propSchema.ReadOnly != nil && *propSchema.ReadOnly,
-			WriteOnly:           propSchema.WriteOnly != nil && *propSchema.WriteOnly,
-			PrimaryErrorMessage: isPrimaryErrorMessage(propSchema),
-		})
+		td.Fields = append(td.Fields, a.convertProperty(goName, propName, propSchema, requiredSet[propName], multipartBody))
 	}
 
 	// If the object has both properties and additionalProperties, add an extra field.
@@ -448,6 +444,29 @@ func catchAllFieldName(fields []*ir.Field) string {
 		name = "AdditionalProperties" + strconv.Itoa(i)
 	}
 	return name
+}
+
+// formFileType returns the Go type for a multipart property carrying file content.
+func formFileType(schema *highbase.Schema) (string, bool) {
+	if variant, ok := nullableUnionVariant(schema); ok {
+		return formFileType(variant)
+	}
+	if isBinarySchema(schema) {
+		return "FormFile", true
+	}
+	if primaryType(schema) == "array" && schema.Items != nil && schema.Items.IsA() {
+		items, err := schema.Items.A.BuildSchema()
+		if err == nil && items != nil && isBinarySchema(items) {
+			return "[]FormFile", true
+		}
+	}
+	return "", false
+}
+
+// isBinarySchema reports whether a schema is `type: string, format: binary`,
+// which inside a multipart body means file content rather than text.
+func isBinarySchema(schema *highbase.Schema) bool {
+	return primaryType(schema) == "string" && schema.Format == "binary"
 }
 
 // convertAdditionalPropertiesMap creates a map alias when an object has
@@ -524,18 +543,17 @@ func (a *Analyzer) convertPrimitive(goName, primaryType string, schema *highbase
 // pass "" when no context is available.
 func (a *Analyzer) resolveGoType(schema *highbase.Schema, nameHint string) string {
 	// Check if this schema is a $ref pointing to a known component schema.
-	if schema.ParentProxy != nil {
-		ref := schema.ParentProxy.GetReference()
-		if ref != "" {
-			refName := refToSchemaName(ref)
-			if refName != "" {
-				if td, ok := a.typesBySchema[refName]; ok {
-					return td.Name
-				}
-				// Not yet converted, use the Go name directly.
-				return naming.Exported(refName)
-			}
-		}
+	if goType := a.refGoType(schema); goType != "" {
+		return goType
+	}
+
+	// "nullable T" spelled as a union resolves to T; the pointer that carries the
+	// null comes from the field or parameter being optional/nullable.
+	if variant, ok := nullableUnionVariant(schema); ok {
+		return a.resolveGoType(variant, nameHint)
+	}
+	if goType, ok := a.uniformUnionGoType(schema, nameHint); ok {
+		return goType
 	}
 
 	// Inline oneOf/anyOf: synthesize a named union so $ref variants stay typed.
@@ -597,20 +615,34 @@ func (a *Analyzer) synthesizeInlineUnion(schema *highbase.Schema, nameHint strin
 		return "", false
 	}
 
-	refs := make([]string, 0, len(variants))
-	hasRef := false
+	// Key on what each member resolves to rather than on its $ref, so two inline
+	// unions of different shapes don't collapse onto one synthesized type.
+	members := make([]string, 0, len(variants))
+	typed := false
 	for _, proxy := range variants {
-		ref := proxy.GetReference()
-		if ref != "" {
-			hasRef = true
+		if isNullVariant(proxy) {
+			continue
 		}
-		refs = append(refs, ref)
+		if ref := proxy.GetReference(); ref != "" {
+			members = append(members, ref)
+			typed = true
+			continue
+		}
+		variantSchema, err := proxy.BuildSchema()
+		if err != nil || variantSchema == nil {
+			return "", false
+		}
+		goType := a.resolveGoType(variantSchema, suffixHint(nameHint, "Variant"))
+		members = append(members, goType)
+		typed = typed || goType != "any"
 	}
-	if !hasRef {
+	// A union whose members all decode into any is just any; naming it would add a
+	// type that carries no more information than the bare interface.
+	if !typed || len(members) < 2 {
 		return "", false
 	}
 
-	key := kind + "|" + strings.Join(refs, ",")
+	key := kind + "|" + strings.Join(members, ",")
 	if schema.Discriminator != nil {
 		key += "|" + schema.Discriminator.PropertyName
 	}
@@ -649,12 +681,147 @@ func primaryType(schema *highbase.Schema) string {
 }
 
 // isNullable checks whether a schema is nullable. In OpenAPI 3.1, this is
-// indicated by type: ["string", "null"]. In 3.0, it's nullable: true.
+// indicated by type: ["string", "null"] or a {"type": "null"} member of a
+// oneOf/anyOf. In 3.0, it's nullable: true.
 func isNullable(schema *highbase.Schema) bool {
 	if schema.Nullable != nil && *schema.Nullable {
 		return true
 	}
-	return slices.Contains(schema.Type, "null")
+	if slices.Contains(schema.Type, "null") {
+		return true
+	}
+	return slices.ContainsFunc(unionVariants(schema), isNullVariant)
+}
+
+// unionVariants returns a schema's oneOf variants, or its anyOf variants when it
+// has no oneOf.
+func unionVariants(schema *highbase.Schema) []*highbase.SchemaProxy {
+	if len(schema.OneOf) > 0 {
+		return schema.OneOf
+	}
+	return schema.AnyOf
+}
+
+// isNullVariant reports whether a union member is the bare {"type": "null"}
+// schema that makes the union nullable.
+func isNullVariant(proxy *highbase.SchemaProxy) bool {
+	schema, err := proxy.BuildSchema()
+	if err != nil || schema == nil {
+		return false
+	}
+	return primaryType(schema) == "" && slices.Contains(schema.Type, "null")
+}
+
+// nullableUnionVariant returns the sole non-null member of a oneOf/anyOf — the
+// OpenAPI 3.1 spelling of "nullable T"; a real choice returns ok=false.
+func nullableUnionVariant(schema *highbase.Schema) (*highbase.Schema, bool) {
+	variants := unionVariants(schema)
+	if len(variants) == 0 {
+		return nil, false
+	}
+
+	var only *highbase.Schema
+	for _, proxy := range variants {
+		if isNullVariant(proxy) {
+			continue
+		}
+		if only != nil {
+			return nil, false
+		}
+		variant, err := proxy.BuildSchema()
+		if err != nil || variant == nil {
+			return nil, false
+		}
+		only = variant
+	}
+	if only == nil {
+		return nil, false
+	}
+	return only, true
+}
+
+// uniformUnionGoType returns the Go type of a oneOf/anyOf whose non-null members
+// all resolve to it — several refinements of one type are that type, not a choice.
+func (a *Analyzer) uniformUnionGoType(schema *highbase.Schema, nameHint string) (string, bool) {
+	variants := unionVariants(schema)
+	if len(variants) < 2 {
+		return "", false
+	}
+
+	// Resolving a member can synthesize a type for it, so use the same hint the
+	// union path would: probing must not let a member claim the name the union
+	// itself will need when the members turn out to disagree.
+	memberHint := suffixHint(nameHint, "Variant")
+
+	goType := ""
+	for _, proxy := range variants {
+		if isNullVariant(proxy) {
+			continue
+		}
+		variant, err := proxy.BuildSchema()
+		if err != nil || variant == nil {
+			return "", false
+		}
+		resolved := a.resolveGoType(variant, memberHint)
+		if resolved == "any" || (goType != "" && resolved != goType) {
+			return "", false
+		}
+		goType = resolved
+	}
+	return goType, goType != ""
+}
+
+// convertNullableUnion converts the collapsed "nullable T" union at goName; a
+// $ref variant aliases the type it points at.
+func (a *Analyzer) convertNullableUnion(goName, specName string, schema, variant *highbase.Schema) (*ir.TypeDef, error) {
+	nullable := isNullable(schema)
+	if goType := a.refGoType(variant); goType != "" {
+		return &ir.TypeDef{
+			Name:        goName,
+			Description: schema.Description,
+			Kind:        ir.TypeKindAlias,
+			GoType:      goType,
+			IsNullable:  nullable,
+		}, nil
+	}
+
+	td, err := a.convertSchema(goName, specName, variant)
+	if err != nil {
+		return nil, err
+	}
+	td.IsNullable = nullable
+	if td.Description == "" {
+		td.Description = schema.Description
+	}
+	return td, nil
+}
+
+// refGoType returns the Go type name a $ref schema resolves to, or "" when the
+// schema is not a reference to a component schema.
+func (a *Analyzer) refGoType(schema *highbase.Schema) string {
+	if schema.ParentProxy == nil {
+		return ""
+	}
+	return a.goTypeForRef(schema.ParentProxy.GetReference())
+}
+
+// goTypeForRef returns the Go type name a "#/components/schemas/..." reference
+// resolves to, or "" when it points elsewhere.
+func (a *Analyzer) goTypeForRef(ref string) string {
+	refName := refToSchemaName(ref)
+	if refName == "" {
+		return ""
+	}
+	return a.goTypeForSchemaName(refName)
+}
+
+// goTypeForSchemaName returns the Go type name of a component schema, falling
+// back to its exported spelling when it has not been converted yet.
+func (a *Analyzer) goTypeForSchemaName(refName string) string {
+	if td, ok := a.typesBySchema[refName]; ok {
+		return td.Name
+	}
+	return naming.Exported(refName)
 }
 
 // goTypeForPrimitive maps an OpenAPI type + format to a Go type.

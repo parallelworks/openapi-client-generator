@@ -19,6 +19,7 @@ func FuncMap() template.FuncMap {
 		"paramDocComment":         paramDocComment,
 		"indent":                  indent,
 		"jsonTag":                 jsonTag,
+		"fieldTag":                fieldTag,
 		"hasOperations":           hasOperations,
 		"successType":             successType,
 		"hasBody":                 hasBody,
@@ -40,6 +41,8 @@ func FuncMap() template.FuncMap {
 		"errorMessageField":       errorMessageField,
 		"errorType":               errorType,
 		"successContentType":      successContentType,
+		"requestContentType":      requestContentType,
+		"hasNonJSONBody":          hasNonJSONBody,
 	}
 }
 
@@ -175,6 +178,17 @@ func indent(s string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// fieldTag returns a struct field's full tag. The catch-all carries a marker
+// because its json tag is "-": the body encoders have no other way to tell it
+// apart from a field the schema genuinely excludes.
+func fieldTag(f *ir.Field) string {
+	tag := `json:"` + jsonTag(f) + `"`
+	if f.CatchAll {
+		tag += ` openapi:"additionalProperties"`
+	}
+	return tag
 }
 
 // jsonTag returns the JSON struct tag value for a field.
@@ -365,4 +379,23 @@ func successContentType(op *ir.OperationDef) string {
 		return "application/json"
 	}
 	return op.SuccessResponse.ContentType
+}
+
+// requestContentType returns the media type an operation sends its request body
+// as, or "" when it has no body.
+func requestContentType(op *ir.OperationDef) string {
+	if op.RequestBody == nil {
+		return ""
+	}
+	return op.RequestBody.ContentType
+}
+
+// hasNonJSONBody reports whether any operation sends a request body in a media
+// type other than JSON, which is what pulls the extra body encoders into the
+// generated helpers.
+func hasNonJSONBody(pkg *ir.Package) bool {
+	return slices.ContainsFunc(pkg.Operations, func(op *ir.OperationDef) bool {
+		ct := requestContentType(op)
+		return ct != "" && !strings.Contains(ct, "json")
+	})
 }

@@ -20,6 +20,8 @@ type Analyzer struct {
 	// deduplicated on their variant set and discriminator.
 	synthesized      []*ir.TypeDef
 	synthesizedByKey map[string]*ir.TypeDef
+	// multipartBodies holds the schema names a multipart request body refers to.
+	multipartBodies map[string]bool
 }
 
 // New creates an Analyzer for the given high-level OpenAPI model.
@@ -54,6 +56,11 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 		}
 	}
 
+	// A multipart body's binary properties are generated as file parts rather
+	// than as byte slices, which has to be settled before the schemas holding
+	// them are converted.
+	a.multipartBodies = a.collectMultipartBodySchemas()
+
 	// Analyze component schemas.
 	if err := a.analyzeComponentSchemas(pkg); err != nil {
 		return nil, err
@@ -71,6 +78,9 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 
 	// Append union types synthesized for inline oneOf/anyOf schemas.
 	pkg.Types = append(pkg.Types, a.synthesized...)
+
+	// A spec is free to define a type in terms of itself; Go aliases are not.
+	breakAliasCycles(pkg.Types)
 
 	// Detect paginated operations.
 	a.detectPagination(pkg)

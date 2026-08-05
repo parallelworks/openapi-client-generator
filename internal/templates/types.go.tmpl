@@ -34,7 +34,7 @@ func deleteDeclaredProperties(obj map[string]json.RawMessage, declared []string)
 {{ end }}type {{ .Name }} struct {
 {{ range .Fields }}{{ $fDoc := fieldDocComment . }}{{ if $fDoc }}{{ indent $fDoc }}
 {{ end }}{{ if .Embedded }}	{{ .Type }}
-{{ else }}	{{ .Name }} {{ .Type }} `json:"{{ jsonTag . }}"`
+{{ else }}	{{ .Name }} {{ .Type }} `{{ fieldTag . }}`
 {{ end }}{{ end }}}
 {{ with catchAllField . }}
 // MarshalJSON implements json.Marshaler for {{ $typeName }}, inlining
@@ -191,11 +191,11 @@ func (u *{{ $typeName }}) UnmarshalJSON(data []byte) error {
 	}
 {{- else }}
 	var errors []error
-{{- range .UnionTypes }}
-{{- if ne .TypeName "any" }}
-	var val{{ .TypeName }} {{ .TypeName }}
-	if err := json.Unmarshal(data, &val{{ .TypeName }}); err == nil {
-		u.Value = val{{ .TypeName }}
+{{- range $i, $v := .UnionTypes }}
+{{- if ne $v.TypeName "any" }}
+	var variant{{ $i }} {{ $v.TypeName }}
+	if err := json.Unmarshal(data, &variant{{ $i }}); err == nil {
+		u.Value = variant{{ $i }}
 		return nil
 	} else {
 		errors = append(errors, err)
