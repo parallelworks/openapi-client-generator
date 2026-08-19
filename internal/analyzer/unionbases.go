@@ -96,7 +96,7 @@ func sharedFields(byName map[string]*ir.TypeDef, variants []*ir.UnionVariant, di
 				declared[fieldKey(f)] = true
 			}
 		}
-		kept := shared[:0]
+		var kept []*ir.Field
 		for _, f := range shared {
 			if declared[fieldKey(f)] {
 				kept = append(kept, f)
