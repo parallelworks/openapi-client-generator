@@ -31,6 +31,7 @@ func FuncMap() template.FuncMap {
 		"paramType":               paramType,
 		"hasUnions":               hasUnions,
 		"hasUntypedVariant":       hasUntypedVariant,
+		"distinctVariants":        distinctVariants,
 		"catchAllField":           catchAllField,
 		"catchAllValueType":       catchAllValueType,
 		"hasCatchAllTypes":        hasCatchAllTypes,
@@ -557,6 +558,18 @@ func hasUnions(types []*ir.TypeDef) bool {
 // derived for, whose payloads nothing but an any decode accepts.
 func hasUntypedVariant(td *ir.TypeDef) bool {
 	return slices.ContainsFunc(td.UnionTypes, func(v *ir.UnionVariant) bool { return v.TypeName == "any" })
+}
+
+// distinctVariants returns each variant Go type of a union once, so a type switch
+// over them cannot repeat a case.
+func distinctVariants(td *ir.TypeDef) []string {
+	var names []string
+	for _, v := range td.UnionTypes {
+		if !slices.Contains(names, v.TypeName) {
+			names = append(names, v.TypeName)
+		}
+	}
+	return names
 }
 
 // discriminatorFieldName converts a JSON property name to a Go field name

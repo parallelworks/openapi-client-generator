@@ -79,6 +79,7 @@ type TypeDef struct {
 	EnumValues    []*EnumVal        // For enums
 	EnumGoType    string            // For enums: the underlying Go type (e.g., "string", "int")
 	UnionTypes    []*UnionVariant   // For oneOf/anyOf unions
+	BaseType      string            // For unions: the type every variant embeds
 	Discriminator *DiscriminatorDef // If polymorphic via discriminator
 	IsNullable    bool
 }

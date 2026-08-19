@@ -152,6 +152,21 @@ for _, shape := range shapes {
 }
 ```
 
+When every variant composes the same schema through `allOf`, the wrapper also
+exposes it, so the fields all variants share are readable without a type switch
+that has to be revisited whenever a variant is added:
+
+```go
+for _, pet := range pets {
+    if base := pet.Base(); base != nil {
+        fmt.Println(base.ID, base.Name)
+    }
+}
+```
+
+`Base()` returns nil for an unknown variant, and is generated only when *every*
+variant composes the *same* single base.
+
 A payload that carries no discriminator property at all is still an error — there
 is nothing to identify it by — as is a union *without* a discriminator when no
 variant matches. When the schema declares a `discriminator` but no `mapping`, the

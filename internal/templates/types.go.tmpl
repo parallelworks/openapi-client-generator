@@ -290,6 +290,20 @@ func (u {{ .Name }}) Raw() json.RawMessage {
 	return json.RawMessage(u.raw)
 }
 {{ end }}
+{{- if .BaseType }}{{ $base := .BaseType }}
+// Base returns the {{ .BaseType }} that every variant of {{ .Name }} composes, or
+// nil when Value holds none of them. It is a copy: writing to it does not change
+// the value the union holds.
+func (u {{ .Name }}) Base() *{{ .BaseType }} {
+	switch v := u.Value.(type) {
+{{- range distinctVariants . }}
+	case {{ . }}:
+		return &v.{{ $base }}
+{{- end }}
+	}
+	return nil
+}
+{{ end }}
 // MarshalJSON implements json.Marshaler for {{ .Name }}.
 func (u {{ .Name }}) MarshalJSON() ([]byte, error) {
 {{- if .Discriminator }}
