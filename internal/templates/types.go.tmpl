@@ -290,15 +290,23 @@ func (u {{ .Name }}) Raw() json.RawMessage {
 	return json.RawMessage(u.raw)
 }
 {{ end }}
-{{- if .BaseType }}{{ $base := .BaseType }}
-// Base returns the {{ .BaseType }} that every variant of {{ .Name }} composes, or
+{{- if .BaseType }}{{ $base := .BaseType }}{{ $baseFields := unionBaseFields $ . }}
+// Base returns the {{ .BaseType }} that every variant of {{ .Name }} carries, or
 // nil when Value holds none of them. It is a copy: writing to it does not change
 // the value the union holds.
 func (u {{ .Name }}) Base() *{{ .BaseType }} {
 	switch v := u.Value.(type) {
 {{- range distinctVariants . }}
 	case {{ . }}:
+{{- if $baseFields }}
+		return &{{ $base }}{
+{{- range $baseFields }}
+			{{ .Name }}: v.{{ .Name }},
+{{- end }}
+		}
+{{- else }}
 		return &v.{{ $base }}
+{{- end }}
 {{- end }}
 	}
 	return nil

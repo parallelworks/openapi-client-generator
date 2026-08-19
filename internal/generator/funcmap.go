@@ -32,6 +32,7 @@ func FuncMap() template.FuncMap {
 		"hasUnions":               hasUnions,
 		"hasUntypedVariant":       hasUntypedVariant,
 		"distinctVariants":        distinctVariants,
+		"unionBaseFields":         unionBaseFields,
 		"catchAllField":           catchAllField,
 		"catchAllValueType":       catchAllValueType,
 		"hasCatchAllTypes":        hasCatchAllTypes,
@@ -570,6 +571,20 @@ func distinctVariants(td *ir.TypeDef) []string {
 		}
 	}
 	return names
+}
+
+// unionBaseFields returns the fields a union's Base accessor copies out of the
+// variant it holds. It is empty when the variants embed the base, which the
+// accessor takes the address of instead.
+func unionBaseFields(pkg *ir.Package, td *ir.TypeDef) []*ir.Field {
+	if td.BaseType == "" || td.BaseEmbedded {
+		return nil
+	}
+	base := typeIndex(pkg).byName[td.BaseType]
+	if base == nil {
+		return nil
+	}
+	return base.Fields
 }
 
 // discriminatorFieldName converts a JSON property name to a Go field name

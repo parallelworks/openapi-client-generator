@@ -152,9 +152,9 @@ for _, shape := range shapes {
 }
 ```
 
-When every variant composes the same schema through `allOf`, the wrapper also
-exposes it, so the fields all variants share are readable without a type switch
-that has to be revisited whenever a variant is added:
+When every variant carries the same properties, the wrapper also exposes them, so
+the fields all variants share are readable without a type switch that has to be
+revisited whenever a variant is added:
 
 ```go
 for _, pet := range pets {
@@ -164,8 +164,14 @@ for _, pet := range pets {
 }
 ```
 
-`Base()` returns nil for an unknown variant, and is generated only when *every*
-variant composes the *same* single base.
+`Base()` returns nil for an unknown variant. Variants that compose a shared schema
+through `allOf` name it directly, and there has to be exactly one such schema.
+Variants that inline the same properties instead, which is all some producers
+emit, get a `<Union>Base` struct synthesized from the properties every variant
+declares identically: same name, same type, same required-ness. The discriminator
+is left out, since it is how the variants differ and a spec that spells the base
+out keeps it out of the shared schema too. The result is a copy, so writing to it
+does not change the variant the union holds.
 
 A payload that carries no discriminator property at all is still an error — there
 is nothing to identify it by — as is a union *without* a discriminator when no

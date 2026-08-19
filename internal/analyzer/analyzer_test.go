@@ -797,6 +797,9 @@ func TestComplexSchemas_AllTypesPresent(t *testing.T) {
 		"ShapeCollection", "ShapeCollectionShapesValue",
 		// Unions used directly as a request or response body.
 		"CreateShapeBody", "CreateShapeResponse", "NamedShape",
+		// Circle and Rectangle both declare shapeType, and the body union
+		// dispatches on kind, so the shared property becomes a base.
+		"CreateShapeBodyBase",
 	}
 
 	if len(pkg.Types) != len(expectedTypes) {

@@ -94,9 +94,9 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 	breakAliasCycles(pkg.Types)
 	breakStructCycles(pkg.Types)
 
-	// A union whose variants all compose the same schema can expose it directly,
-	// which depends on the variants' final field shapes.
-	linkUnionBases(pkg.Types)
+	// A union whose variants all carry the same properties can expose them
+	// directly, which depends on the variants' final field shapes.
+	a.linkUnionBases(pkg)
 
 	// Detect paginated operations.
 	a.detectPagination(pkg)

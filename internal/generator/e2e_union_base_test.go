@@ -141,3 +141,111 @@ func TestBaseDoesNotAliasTheVariant(t *testing.T) {
 }
 `)
 }
+
+const inlinedUnionBaseSpec = `openapi: 3.1.0
+info: { title: pets, version: "1" }
+paths: {}
+components:
+  schemas:
+    Dog:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        age: { type: integer }
+        kind: { type: string, enum: [dog] }
+        goodBoy: { type: boolean }
+      required: [id, name, age, kind, goodBoy]
+    Cat:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        age: { type: integer }
+        kind: { type: string, enum: [cat] }
+        livesLeft: { type: integer }
+      required: [id, name, age, kind, livesLeft]
+    Pet:
+      oneOf:
+        - $ref: "#/components/schemas/Dog"
+        - $ref: "#/components/schemas/Cat"
+      discriminator:
+        propertyName: kind
+        mapping: { dog: "#/components/schemas/Dog", cat: "#/components/schemas/Cat" }
+`
+
+// TestE2E_UnionBaseFromInlinedProperties covers the same union written without
+// allOf, which is all a producer that flattens composition can emit: the shared
+// properties are still reachable off the wrapper.
+func TestE2E_UnionBaseFromInlinedProperties(t *testing.T) {
+	files, _ := generateFromSpec(t, inlinedUnionBaseSpec, "petsapi")
+
+	runGeneratedWireTest(t, files, "inlinedunionbase", `package petsapi
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestBaseCopiesTheSharedProperties(t *testing.T) {
+	var pets []Pet
+	payload := `+"`"+`[
+		{"kind":"dog","id":"1","name":"Rex","age":4,"goodBoy":true},
+		{"kind":"cat","id":"2","name":"Momo","age":7,"livesLeft":9}
+	]`+"`"+`
+	if err := json.Unmarshal([]byte(payload), &pets); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	want := []PetBase{{ID: "1", Name: "Rex", Age: 4}, {ID: "2", Name: "Momo", Age: 7}}
+	for i, p := range pets {
+		base := p.Base()
+		if base == nil {
+			t.Fatalf("pets[%d].Base() = nil, want the shared properties", i)
+		}
+		if *base != want[i] {
+			t.Errorf("pets[%d].Base() = %+v, want %+v", i, *base, want[i])
+		}
+	}
+	if _, ok := pets[1].Value.(Cat); !ok {
+		t.Errorf("pets[1].Value = %T, want Cat", pets[1].Value)
+	}
+}
+
+func TestBaseIsNilForAnUnknownVariant(t *testing.T) {
+	var p Pet
+	if err := json.Unmarshal([]byte(`+"`"+`{"kind":"parrot","id":"3","name":"Polly"}`+"`"+`), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.Base() != nil {
+		t.Errorf("Base() = %+v, want nil for an unknown variant", p.Base())
+	}
+}
+
+func TestVariantsKeepTheirOwnFields(t *testing.T) {
+	var p Pet
+	if err := json.Unmarshal([]byte(`+"`"+`{"kind":"dog","id":"1","name":"Rex","age":4,"goodBoy":true}`+"`"+`), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	dog, ok := p.Value.(Dog)
+	if !ok {
+		t.Fatalf("Value = %T, want Dog", p.Value)
+	}
+	if dog.Name != "Rex" || !dog.GoodBoy {
+		t.Errorf("Dog = %+v, want its own fields intact", dog)
+	}
+
+	out, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var back Pet
+	if err := json.Unmarshal(out, &back); err != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+	if *back.Base() != *p.Base() {
+		t.Errorf("round trip changed the base: %+v vs %+v", *back.Base(), *p.Base())
+	}
+}
+`)
+}
