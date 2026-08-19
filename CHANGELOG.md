@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.7](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.6...v0.2.7) (2026-08-19)
+
+
+### Features
+
+* **generator:** unions expose the base every variant composes ([#57](https://github.com/parallelworks/openapi-client-generator/issues/57)) ([d9de8a1](https://github.com/parallelworks/openapi-client-generator/commit/d9de8a10691ab8b7d6342ef5587083ec5cd92bca))
+
 ## [0.2.6](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.5...v0.2.6) (2026-08-05)
 
 
