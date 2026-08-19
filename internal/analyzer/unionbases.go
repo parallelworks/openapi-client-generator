@@ -30,10 +30,12 @@ func (a *Analyzer) linkUnionBases(pkg *ir.Package) {
 			continue
 		}
 		base := &ir.TypeDef{
-			Name:        a.namer.Unique(naming.Exported(td.Name + "Base")),
-			Description: "The properties every variant of " + td.Name + " declares.",
-			Kind:        ir.TypeKindStruct,
-			Fields:      fields,
+			Name: a.namer.Unique(naming.Exported(td.Name + "Base")),
+			Description: "The properties every variant of " + td.Name + " declares.\n" +
+				"Derived from the variants rather than declared by the spec, so it\n" +
+				"changes when they do.",
+			Kind:   ir.TypeKindStruct,
+			Fields: fields,
 		}
 		pkg.Types = append(pkg.Types, base)
 		td.BaseType = base.Name

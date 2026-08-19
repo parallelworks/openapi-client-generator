@@ -168,7 +168,9 @@ for _, pet := range pets {
 through `allOf` name it directly, and there has to be exactly one such schema.
 Variants that inline the same properties instead, which is all some producers
 emit, get a `<Union>Base` struct synthesized from the properties every variant
-declares identically: same name, same type, same required-ness. The discriminator
+declares identically: same name, same type, same required-ness. That type is
+derived from the variants rather than declared by the spec, so it changes when
+they do. The discriminator
 is left out, since it is how the variants differ and a spec that spells the base
 out keeps it out of the shared schema too. The result is a copy, so writing to it
 does not change the variant the union holds.

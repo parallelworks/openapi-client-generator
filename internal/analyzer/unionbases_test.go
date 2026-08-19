@@ -1,6 +1,7 @@
 package analyzer
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/parallelworks/openapi-client-generator/internal/ir"
@@ -393,6 +394,22 @@ func TestUnionBase_NeedsTwoStructVariants(t *testing.T) {
 		}
 		if td.BaseType != "" {
 			t.Errorf("%s.BaseType = %q, want empty", name, td.BaseType)
+		}
+	}
+}
+
+// sharedFields copies each field it keeps with *f, which is a complete copy only
+// while ir.Field holds nothing by reference. A member added later that the copy
+// would alias has to be copied deliberately, and the aliasing is silent until
+// something writes through it.
+func TestSharedFieldsCopyStaysComplete(t *testing.T) {
+	field := reflect.TypeFor[ir.Field]()
+	for i := range field.NumField() {
+		member := field.Field(i)
+		switch member.Type.Kind() {
+		case reflect.String, reflect.Bool:
+		default:
+			t.Errorf("ir.Field.%s is a %s, which sharedFields now aliases into the synthesized base", member.Name, member.Type.Kind())
 		}
 	}
 }
