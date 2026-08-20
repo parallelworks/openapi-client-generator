@@ -61,6 +61,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Bare"
+  /doodads:
+    get:
+      operationId: listDoodads
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Widget"
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Opaque"
 components:
   schemas:
     Widget:
@@ -89,6 +107,16 @@ components:
       properties:
         message:
           type: string
+    Opaque:
+      type: object
+      properties:
+        code:
+          type: integer
+        trace:
+          type: object
+          properties:
+            span:
+              type: string
 `
 
 // TestE2E_ErrorResponseMessage verifies a parsed error response surfaces the
@@ -119,9 +147,19 @@ func TestAnnotatedPointerFieldRendered(t *testing.T) {
 	}
 }
 
-func TestUnannotatedSchemaKeepsBody(t *testing.T) {
-	err := parseBareResponse(&APIError{StatusCode: 404, Status: "404 Not Found", Body: []byte(` + "`" + `{"message":"not rendered"}` + "`" + `)})
-	if got := err.Error(); !strings.Contains(got, ` + "`" + `{"message":"not rendered"}` + "`" + `) {
+// A schema that marks nothing still names its message the way most APIs do.
+func TestConventionalNameIsRendered(t *testing.T) {
+	err := parseBareResponse(&APIError{StatusCode: 404, Status: "404 Not Found", Body: []byte(` + "`" + `{"message":"Widget not found"}` + "`" + `)})
+	if got := err.Error(); got != "API error 404 Not Found: Widget not found" {
+		t.Fatalf("Error() = %q", got)
+	}
+}
+
+// A body with no property that reads as a message keeps the raw output, which is
+// the only honest thing to print.
+func TestBodyWithoutAMessageKeepsBody(t *testing.T) {
+	err := parseOpaqueResponse(&APIError{StatusCode: 500, Status: "500 Internal Server Error", Body: []byte(` + "`" + `{"code":7}` + "`" + `)})
+	if got := err.Error(); !strings.Contains(got, ` + "`" + `{"code":7}` + "`" + `) {
 		t.Fatalf("Error() = %q", got)
 	}
 }

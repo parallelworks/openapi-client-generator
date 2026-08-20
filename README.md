@@ -220,12 +220,11 @@ a parameter are named the same way, and keep encoding under their style.
 
 ### Error messages
 
-`Error()` on a typed error wrapper prints the raw response body, which is the
-only safe default: nothing in a spec says which property of an error schema
-holds the human-readable message.
+`Error()` on a typed error wrapper renders the property that carries the
+human-readable message, falling back to the raw body when it finds none.
 
-A schema can say so with Kiota's `x-ms-primary-error-message` extension. Mark the
-property that carries the message:
+A schema names that property in one of two ways. Marking it is exact, either with
+the vendor-neutral `x-error-message` or with Kiota's `x-ms-primary-error-message`:
 
 ```yaml
 components:
@@ -237,7 +236,7 @@ components:
           type: integer
         message:
           type: string
-          x-ms-primary-error-message: true
+          x-error-message: true
 ```
 
 `Error()` then renders that property instead of the body:
@@ -250,6 +249,13 @@ The marked property has to be a string, and the first one a schema marks is the
 one used. When it is empty, or the body does not parse, the output falls back to
 the raw body, so a message never disappears. `Detail` still holds the whole
 parsed body either way.
+
+A schema that marks nothing is read by the names error bodies conventionally use,
+most specific first: `message`, `detail`, `error_description`, `title`, `error`.
+A body carrying several is tried in that order at runtime, so an RFC 7807
+response renders `detail` when it has one and `title` when it does not. A body
+with no such property, or with one holding something other than text, keeps the
+raw output.
 
 ### Webhooks and callbacks
 

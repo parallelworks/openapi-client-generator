@@ -50,7 +50,7 @@ func FuncMap() template.FuncMap {
 		"paginationCursorField":   paginationCursorField,
 		"toGoName":                naming.Exported,
 		"uniqueErrorTypes":        uniqueErrorTypes,
-		"errorMessageField":       errorMessageField,
+		"errorMessageFields":      errorMessageFields,
 		"errorType":               errorType,
 		"successContentType":      successContentType,
 		"requestContentType":      requestContentType,
@@ -784,20 +784,57 @@ type ErrorWrapper struct {
 	Detail string
 }
 
-// errorMessageField returns the error type's string field annotated with
-// x-ms-primary-error-message, or nil when the spec designates none.
-func errorMessageField(pkg *ir.Package, typeName string) *ir.Field {
+// errorMessageFields returns the string properties of an error body that can
+// stand in for it in Error(), most specific first: the one the spec marks, or
+// the ones named the way error bodies conventionally name a message.
+func errorMessageFields(pkg *ir.Package, typeName string) []*ir.Field {
 	for _, t := range pkg.Types {
 		if t.Name != typeName || t.Kind != ir.TypeKindStruct {
 			continue
 		}
 		for _, f := range t.Fields {
-			if f.PrimaryErrorMessage && (f.Type == "string" || f.Type == "*string") {
-				return f
+			// A property the spec marks is the message, and an empty one falls
+			// back to the body rather than to a neighbor.
+			if f.PrimaryErrorMessage && isStringField(f) {
+				return []*ir.Field{f}
+			}
+		}
+		return conventionalMessageFields(t)
+	}
+	return nil
+}
+
+// conventionalErrorMessageNames are the property names an error body carries its
+// human-readable message under, most specific first. RFC 7807 supplies detail
+// and title; the rest are what APIs write when they follow no standard at all.
+var conventionalErrorMessageNames = []string{
+	"message",
+	"detail",
+	"error_description",
+	"title",
+	"error",
+}
+
+// conventionalMessageFields returns the message properties of an error body that
+// marks none, most specific first. All of them, not just the first: a body
+// carrying the RFC 7807 pair may fill in detail or only title, and which one
+// arrives is a runtime question rather than a generation-time one.
+func conventionalMessageFields(td *ir.TypeDef) []*ir.Field {
+	var fields []*ir.Field
+	for _, name := range conventionalErrorMessageNames {
+		for _, f := range td.Fields {
+			if strings.EqualFold(f.JSONName, name) && isStringField(f) {
+				fields = append(fields, f)
 			}
 		}
 	}
-	return nil
+	return fields
+}
+
+// isStringField reports whether a field holds text that can stand in for the
+// whole body in an error message.
+func isStringField(f *ir.Field) bool {
+	return f.Type == "string" || f.Type == "*string"
 }
 
 // errorType returns the error response type name for an operation, or "".

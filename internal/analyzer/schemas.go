@@ -282,22 +282,29 @@ func (a *Analyzer) convertProperty(goName, propName string, propSchema *highbase
 	}
 }
 
-// isPrimaryErrorMessage reports whether a property schema carries Kiota's
-// x-ms-primary-error-message extension marking it as the human-readable
-// error message.
+// isPrimaryErrorMessage reports whether a property schema is marked as the
+// human-readable error message, by Kiota's x-ms-primary-error-message or by the
+// vendor-neutral x-error-message.
 func isPrimaryErrorMessage(schema *highbase.Schema) bool {
 	if schema.Extensions == nil {
 		return false
 	}
 	for name, node := range schema.Extensions.FromOldest() {
-		if name != "x-ms-primary-error-message" || node == nil {
+		// x-error-message says the same thing without asking a producer to emit
+		// another toolchain's vocabulary.
+		if name != "x-ms-primary-error-message" && name != "x-error-message" {
+			continue
+		}
+		if node == nil {
 			continue
 		}
 		var enabled bool
 		if err := node.Decode(&enabled); err != nil {
-			return false
+			continue
 		}
-		return enabled
+		if enabled {
+			return true
+		}
 	}
 	return false
 }
