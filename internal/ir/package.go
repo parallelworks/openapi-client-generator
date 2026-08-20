@@ -9,6 +9,7 @@ type Package struct {
 	ServerURLs  []string        // Default server URLs
 	Info        *APIInfo        // API title, version, description
 	UserAgent   string          // Default User-Agent for generated clients
+	Warnings    []string        // Spec constructs the generator could not act on
 }
 
 // APIInfo contains metadata about the API.

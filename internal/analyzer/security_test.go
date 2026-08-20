@@ -96,3 +96,56 @@ func TestAnalyzeSecuritySchemes_NilSecuritySchemes(t *testing.T) {
 
 	result.Model.Components.SecuritySchemes = origSchemes
 }
+
+const degradedSecuritySpec = `openapi: 3.1.0
+info: { title: sec, version: "1" }
+paths:
+  /t:
+    get:
+      operationId: getT
+      responses:
+        "204": { description: ok }
+components:
+  securitySchemes:
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: https://issuer.example.com/.well-known/openid-configuration
+    caps:
+      type: http
+      scheme: Bearer
+    legacy:
+      type: http
+      scheme: digest
+    mtls:
+      type: mutualTLS
+    weird:
+      type: somethingNew
+`
+
+// A scheme the generator cannot act on is one declaration in a spec the caller
+// may not even authenticate with, so it costs a warning rather than the client.
+func TestSecuritySchemes_UnsupportedDegradeToAWarning(t *testing.T) {
+	pkg, _ := analyzeSpec(t, degradedSecuritySpec)
+
+	byName := make(map[string]*ir.AuthScheme, len(pkg.AuthSchemes))
+	for _, s := range pkg.AuthSchemes {
+		byName[s.Name] = s
+	}
+
+	// OpenID Connect is a bearer token on the wire.
+	if oidc := byName["oidc"]; oidc == nil || oidc.Type != ir.AuthTypeBearer {
+		t.Errorf("oidc scheme = %+v, want a bearer provider", oidc)
+	}
+	// RFC 7235 makes the scheme name case-insensitive.
+	if caps := byName["caps"]; caps == nil || caps.Type != ir.AuthTypeBearer {
+		t.Errorf("caps scheme = %+v, want a bearer provider", caps)
+	}
+	for _, name := range []string{"legacy", "mtls", "weird"} {
+		if s := byName[name]; s != nil {
+			t.Errorf("%s scheme = %+v, want no provider", name, s)
+		}
+	}
+	if len(pkg.Warnings) != 3 {
+		t.Errorf("warnings = %v, want one each for legacy, mtls, and weird", pkg.Warnings)
+	}
+}
