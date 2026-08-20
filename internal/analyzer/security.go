@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"fmt"
+	"strings"
 
 	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
 
@@ -30,14 +31,17 @@ func (a *Analyzer) analyzeSecuritySchemes(pkg *ir.Package) error {
 
 		switch scheme.Type {
 		case "http":
-			switch scheme.Scheme {
+			// RFC 7235 registers auth scheme names case-insensitively, and specs
+			// spell this one both ways.
+			switch strings.ToLower(scheme.Scheme) {
 			case "bearer":
 				authScheme.Type = ir.AuthTypeBearer
 				authScheme.BearerFormat = scheme.BearerFormat
 			case "basic":
 				authScheme.Type = ir.AuthTypeBasic
 			default:
-				return fmt.Errorf("unsupported http scheme %q for security scheme %q", scheme.Scheme, schemeName)
+				pkg.Warnings = append(pkg.Warnings, fmt.Sprintf("security scheme %q: no provider generated for http scheme %q", schemeName, scheme.Scheme))
+				continue
 			}
 
 		case "apiKey":
@@ -51,8 +55,20 @@ func (a *Analyzer) analyzeSecuritySchemes(pkg *ir.Package) error {
 				authScheme.OAuthFlows = convertOAuthFlows(scheme.Flows)
 			}
 
+		case "openIdConnect":
+			// OpenID Connect is a bearer token on the wire; the discovery document
+			// is the caller's business, not the transport's.
+			authScheme.Type = ir.AuthTypeBearer
+
+		case "mutualTLS":
+			// The certificate is configured on the transport, so there is nothing
+			// for a provider to add to the request.
+			pkg.Warnings = append(pkg.Warnings, fmt.Sprintf("security scheme %q: mutualTLS is configured on the HTTP transport, so no provider is generated", schemeName))
+			continue
+
 		default:
-			return fmt.Errorf("unsupported security scheme type %q for %q", scheme.Type, schemeName)
+			pkg.Warnings = append(pkg.Warnings, fmt.Sprintf("security scheme %q: no provider generated for unrecognized type %q", schemeName, scheme.Type))
+			continue
 		}
 
 		pkg.AuthSchemes = append(pkg.AuthSchemes, authScheme)

@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -68,6 +69,10 @@ func generate(specPath, outputDir, packageName, userAgent string, allowRemoteRef
 		return fmt.Errorf("analyzing spec: %w", err)
 	}
 	pkg.UserAgent = userAgent
+
+	for _, w := range pkg.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
 
 	gen, err := generator.New(pkg)
 	if err != nil {
