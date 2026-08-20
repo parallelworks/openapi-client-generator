@@ -70,7 +70,7 @@ type {{ .Name }} struct {
 }
 
 func (e *{{ .Name }}) Error() string {
-{{- with errorMessageField $ .Detail }}
+{{- range errorMessageFields $ .Detail }}
 {{- if .IsPointer }}
 	if e.Detail.{{ .Name }} != nil && *e.Detail.{{ .Name }} != "" {
 		return fmt.Sprintf("API error %s: %s", e.statusLabel(), *e.Detail.{{ .Name }})
