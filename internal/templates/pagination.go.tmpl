@@ -64,8 +64,9 @@ func (it *PageIterator[T]) ForEach(fn func(T) error) error {
 		}
 	}
 }
-{{ range .Operations }}{{ if .Pagination }}{{ if eq .Pagination.Style 0 }}
+{{ range .Operations }}{{ $op := . }}{{ if .Pagination }}
 {{- $hasReqParam := or (hasRequiredQueryParams .) (hasRequiredHeaderParams .) (hasRequiredCookieParams .) }}
+{{- if eq .Pagination.Style 0 }}
 // {{ .Name }}Iter returns an iterator over paginated {{ .Name }} results.
 func (c *Client) {{ .Name }}Iter(ctx context.Context{{ range .PathParams }}, {{ .Name }} {{ .Type }}{{ end }}{{ if hasBody . }}, body {{ if .RequestBody }}{{ if not .RequestBody.Required }}*{{ end }}{{ .RequestBody.TypeName }}{{ else }}any{{ end }}{{ end }}{{ if $hasReqParam }}, params {{ .Name }}Params{{ else }}, opts ...{{ .Name }}Params{{ end }}) *PageIterator[{{ paginationItemType . }}] {
 	return &PageIterator[{{ paginationItemType . }}]{
@@ -90,5 +91,50 @@ func (c *Client) {{ .Name }}Iter(ctx context.Context{{ range .PathParams }}, {{ 
 		},
 	}
 }
-{{ end }}{{ end }}{{ end }}
+{{ else }}{{ with $offset := paginationOffsetParam $op }}
+// {{ $op.Name }}Iter returns an iterator over paginated {{ $op.Name }} results.
+// It advances {{ $offset.OrigName }} {{ if eq $op.Pagination.Style 1 }}by the number of items each page returns{{ else }}one page at a time{{ end }},
+// and stops on the first page that comes back empty.
+func (c *Client) {{ $op.Name }}Iter(ctx context.Context{{ range $op.PathParams }}, {{ .Name }} {{ .Type }}{{ end }}{{ if hasBody $op }}, body {{ if $op.RequestBody }}{{ if not $op.RequestBody.Required }}*{{ end }}{{ $op.RequestBody.TypeName }}{{ else }}any{{ end }}{{ end }}{{ if $hasReqParam }}, params {{ $op.Name }}Params{{ else }}, opts ...{{ $op.Name }}Params{{ end }}) *PageIterator[{{ paginationItemType $op }}] {
+	return &PageIterator[{{ paginationItemType $op }}]{
+		fetch: func(cursor string) ([]{{ paginationItemType $op }}, string, error) {
+			{{ if $hasReqParam }}p := params
+			{{ else }}p := {{ $op.Name }}Params{}
+			if len(opts) > 0 {
+				p = opts[0]
+			}
+			{{ end }}// Where the iterator has reached rides in the cursor. The first page
+			// starts wherever the caller pointed it, so walking on from there
+			// counts from that point rather than from the beginning.
+			at := {{ paginationStart $op.Pagination.Style }}
+{{- if hasPrefix (paramType $offset) "*" }}
+			if p.{{ $offset.FieldName }} != nil {
+				at = int64(*p.{{ $offset.FieldName }})
+			}
+{{- else }}
+			at = int64(p.{{ $offset.FieldName }})
+{{- end }}
+			if cursor != "" {
+				parsed, err := strconv.ParseInt(cursor, 10, 64)
+				if err != nil {
+					return nil, "", fmt.Errorf("reading the {{ $offset.OrigName }} to fetch: %w", err)
+				}
+				at = parsed
+				next := {{ paramElemType $offset }}(at)
+				p.{{ $offset.FieldName }} = {{ if hasPrefix (paramType $offset) "*" }}&next{{ else }}next{{ end }}
+			}
+
+			result, err := c.{{ $op.Name }}(ctx{{ range $op.PathParams }}, {{ .Name }}{{ end }}{{ if hasBody $op }}, body{{ end }}, p)
+			if err != nil {
+				return nil, "", err
+			}
+			items := result.{{ toGoName $op.Pagination.ItemsField }}
+			if len(items) == 0 {
+				return items, "", nil
+			}
+			return items, strconv.FormatInt(at+{{ if eq $op.Pagination.Style 1 }}int64(len(items)){{ else }}1{{ end }}, 10), nil
+		},
+	}
+}
+{{ end }}{{ end }}{{ end }}{{ end }}
 {{ end }}

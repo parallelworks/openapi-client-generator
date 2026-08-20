@@ -166,8 +166,9 @@ func TestPagination_PageBasedDetection(t *testing.T) {
 	if op.Pagination == nil {
 		t.Fatal("ListResults.Pagination should not be nil")
 	}
-	if op.Pagination.Style != ir.PaginationStyleOffset {
-		t.Errorf("ListResults.Pagination.Style = %v, want PaginationStyleOffset", op.Pagination.Style)
+	// page and per_page count pages, not items, so they advance by one.
+	if op.Pagination.Style != ir.PaginationStylePage {
+		t.Errorf("ListResults.Pagination.Style = %v, want PaginationStylePage", op.Pagination.Style)
 	}
 	if op.Pagination.OffsetParam != "page" {
 		t.Errorf("ListResults.Pagination.OffsetParam = %q, want %q", op.Pagination.OffsetParam, "page")
