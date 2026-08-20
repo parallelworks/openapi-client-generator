@@ -384,10 +384,7 @@ func (a *Analyzer) convertParam(param *v3high.Parameter, opName string) (*ir.Par
 			return nil, fmt.Errorf("building param schema: %w", err)
 		}
 		if schema != nil {
-			// No name hint: a style-encoded parameter is written into the URL by
-			// the query encoder, and a synthesized union or struct would go out
-			// as its Go shape rather than as the value the server parses.
-			goType = a.resolveGoType(schema, "")
+			goType = a.resolveGoType(schema, opName+naming.Exported(param.Name))
 		}
 	case param.Content != nil:
 		// A parameter with content carries a document, and the media type says how

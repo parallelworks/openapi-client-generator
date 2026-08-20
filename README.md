@@ -191,6 +191,33 @@ included, stays the raw string. Error responses are captured too, which is where
 a rate limit usually arrives. Calls made with the returned context each overwrite
 the meta, so give one capture to one call.
 
+### Union and object parameters
+
+A parameter whose schema is a union with a genuine choice names a type, so the
+values it accepts are visible in Go rather than hidden behind `any`:
+
+```yaml
+- name: either
+  in: query
+  schema:
+    anyOf: [{ type: string }, { type: integer }]
+```
+
+```go
+either := petstore.ListItemsEither{Value: 42}
+client.ListItems(ctx, petstore.ListItemsParams{Either: &either})
+// ?either=42
+```
+
+The value the union carries is what goes on the wire, under the parameter's own
+style, so a list variant still explodes and a scalar still goes out as itself. A
+union carrying nothing sends no parameter at all. One shape is one type, so two
+parameters declaring the same union share it.
+
+`anyOf: [string, null]` is not a choice of that kind and still collapses to
+`*string`, as do variants that refine a single Go type. Objects written inline in
+a parameter are named the same way, and keep encoding under their style.
+
 ### Error messages
 
 `Error()` on a typed error wrapper prints the raw response body, which is the

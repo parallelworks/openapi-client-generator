@@ -46,7 +46,17 @@ func derefParam(value any) (reflect.Value, bool) {
 		}
 		rv = rv.Elem()
 	}
+	// A union is a wrapper around the value it decoded, and the server is owed
+	// the value, not the wrapper.
+	if u, ok := rv.Interface().(unionValuer); ok {
+		return derefParam(u.unionValue())
+	}
 	return rv, true
+}
+
+// unionValuer is implemented by every generated union.
+type unionValuer interface {
+	unionValue() any
 }
 
 // isSlice reports whether rv is a multi-value slice; a []byte is a scalar
