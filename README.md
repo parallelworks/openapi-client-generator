@@ -10,7 +10,7 @@ Given any OpenAPI 3.1 (or 3.0) spec, it outputs a complete, idiomatic Go client 
 - **Client methods** — per-operation methods with `context.Context`, typed parameters, and typed responses
 - **Response headers**: status and headers captured through the context, with declared headers parsed per operation
 - **Authentication** — `AuthProvider` interface with built-in Bearer, API key, and Basic auth
-- **Error handling** — `APIError` with sentinel errors (`errors.Is`), typed error wrappers with parsed response bodies (`errors.As`)
+- **Error handling** — `APIError` with sentinel errors (`errors.Is`), typed error wrappers with parsed response bodies (`errors.As`), readable messages via `x-ms-primary-error-message`
 - **Pagination** — auto-detected cursor/offset pagination with generic `PageIterator[T]`
 - **Retries** — configurable exponential backoff with jitter and `Retry-After` header support
 - **Middleware** — composable request/response middleware chain
@@ -159,6 +159,39 @@ not a zero that reads as a real value. Everything else, HTTP dates and lists
 included, stays the raw string. Error responses are captured too, which is where
 a rate limit usually arrives. Calls made with the returned context each overwrite
 the meta, so give one capture to one call.
+
+### Error messages
+
+`Error()` on a typed error wrapper prints the raw response body, which is the
+only safe default: nothing in a spec says which property of an error schema
+holds the human-readable message.
+
+A schema can say so with Kiota's `x-ms-primary-error-message` extension. Mark the
+property that carries the message:
+
+```yaml
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+          x-ms-primary-error-message: true
+```
+
+`Error()` then renders that property instead of the body:
+
+```
+API error 404 Not Found: Pet not found
+```
+
+The marked property has to be a string, and the first one a schema marks is the
+one used. When it is empty, or the body does not parse, the output falls back to
+the raw body, so a message never disappears. `Detail` still holds the whole
+parsed body either way.
 
 ### Discriminated unions
 
