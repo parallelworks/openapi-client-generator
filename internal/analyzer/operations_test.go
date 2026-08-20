@@ -534,3 +534,71 @@ func TestMultiMediaResponse_PrefersJSONAndSaysSo(t *testing.T) {
 		t.Errorf("media type warnings = %d, want 1: %v", found, pkg.Warnings)
 	}
 }
+
+const contentParamAnalyzerSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: filter
+          in: query
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Filter" }
+        - name: legacy
+          in: query
+          content:
+            application/xml:
+              schema: { type: string }
+        - name: plain
+          in: query
+          schema: { type: string }
+      responses:
+        "204": { description: ok }
+components:
+  schemas:
+    Filter:
+      type: object
+      properties:
+        field: { type: string }
+`
+
+// A parameter that names a media type carries a document, and the media type is
+// what says how to serialize it.
+func TestContentParam_CarriesItsMediaTypeAndSchema(t *testing.T) {
+	pkg, _ := analyzeSpec(t, contentParamAnalyzerSpec)
+
+	params := make(map[string]*ir.ParamDef)
+	for _, op := range pkg.Operations {
+		for _, p := range op.QueryParams {
+			params[p.OrigName] = p
+		}
+	}
+
+	filter := params["filter"]
+	if filter == nil {
+		t.Fatal("filter param not found")
+	}
+	if filter.ContentType != "application/json" {
+		t.Errorf("filter ContentType = %q, want application/json", filter.ContentType)
+	}
+	if filter.Type != "*Filter" && filter.Type != "Filter" {
+		t.Errorf("filter type = %q, want the declared schema rather than any", filter.Type)
+	}
+
+	// A media type the generator cannot serialize still types its value, and says
+	// so rather than sending JSON where the server expects something else.
+	if legacy := params["legacy"]; legacy == nil || legacy.ContentType != "application/xml" {
+		t.Errorf("legacy param = %+v, want its media type carried", legacy)
+	}
+	if len(pkg.Warnings) != 1 || !strings.Contains(pkg.Warnings[0], "legacy") {
+		t.Errorf("warnings = %v, want one naming the parameter that is not serialized", pkg.Warnings)
+	}
+
+	// A style-encoded parameter has no content type at all.
+	if plain := params["plain"]; plain == nil || plain.ContentType != "" {
+		t.Errorf("plain param = %+v, want no content type", plain)
+	}
+}

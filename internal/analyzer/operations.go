@@ -232,7 +232,7 @@ func (a *Analyzer) convertOperation(httpMethod, path string, pathItem *v3high.Pa
 	// Operation-level params override path-level ones with the same name+location.
 	params := mergeParams(pathItem.Parameters, op.Parameters)
 	for _, param := range params {
-		pd, err := a.convertParam(param)
+		pd, err := a.convertParam(param, opDef.Name)
 		if err != nil {
 			return nil, fmt.Errorf("converting parameter %q: %w", param.Name, err)
 		}
@@ -374,15 +374,35 @@ func mergeParams(pathParams, opParams []*v3high.Parameter) []*v3high.Parameter {
 }
 
 // convertParam converts an OpenAPI parameter to an ir.ParamDef.
-func (a *Analyzer) convertParam(param *v3high.Parameter) (*ir.ParamDef, error) {
+func (a *Analyzer) convertParam(param *v3high.Parameter, opName string) (*ir.ParamDef, error) {
 	goType := "any"
-	if param.Schema != nil {
+	contentType := ""
+	switch {
+	case param.Schema != nil:
 		schema, err := param.Schema.BuildSchema()
 		if err != nil {
 			return nil, fmt.Errorf("building param schema: %w", err)
 		}
 		if schema != nil {
+			// No name hint: a style-encoded parameter is written into the URL by
+			// the query encoder, and a synthesized union or struct would go out
+			// as its Go shape rather than as the value the server parses.
 			goType = a.resolveGoType(schema, "")
+		}
+	case param.Content != nil:
+		// A parameter with content carries a document, and the media type says how
+		// to serialize it. Without reading it the value goes out style-encoded,
+		// which is not what the server parses.
+		var mediaType *v3high.MediaType
+		contentType, mediaType = preferredContent(param.Content)
+		if !isJSONContent(contentType) {
+			a.warnings = append(a.warnings, fmt.Sprintf("parameter %q: %s is not a media type this generator serializes, so the value is sent style-encoded", param.Name, contentType))
+		}
+		if mediaType != nil {
+			goType = a.resolveMediaTypeSchema(mediaType, opName+naming.Exported(param.Name))
+			if goType == "" {
+				goType = "any"
+			}
 		}
 	}
 
@@ -400,6 +420,7 @@ func (a *Analyzer) convertParam(param *v3high.Parameter) (*ir.ParamDef, error) {
 		Deprecated:  param.Deprecated,
 		Style:       style,
 		Explode:     explode,
+		ContentType: contentType,
 	}, nil
 }
 
@@ -590,6 +611,12 @@ func (a *Analyzer) convertSingleResponse(code string, resp *v3high.Response, nam
 	}
 
 	return rd
+}
+
+// isJSONContent reports whether a media type is one the generated code can
+// serialize a parameter value into.
+func isJSONContent(contentType string) bool {
+	return strings.Contains(contentType, "json")
 }
 
 // convertResponseHeaders lowers the headers a response declares. A header value
