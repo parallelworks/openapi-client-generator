@@ -183,15 +183,19 @@ func (c *Client) do(ctx context.Context, method string, path string, body any, c
 
 		if result != nil && len(respBody) > 0 {
 			ct := resp.Header.Get("Content-Type")
-			if strings.Contains(ct, "json") || ct == "" {
+			switch {
+			case strings.Contains(ct, "json") || ct == "":
 				if err := json.Unmarshal(respBody, result); err != nil {
 					return fmt.Errorf("decoding response body: %w", err)
 				}
-			} else if s, ok := result.(*string); ok {
-				*s = string(respBody)
-			} else {
+			case isRawResult(result, respBody):
+				// A body the operation types as bytes or text is itself the value,
+				// so it is taken verbatim rather than parsed.
+			default:
+				// A server that labels JSON as something else is common enough to
+				// try anyway, and the media types name each other when it fails.
 				if err := json.Unmarshal(respBody, result); err != nil {
-					return fmt.Errorf("decoding response body: %w", err)
+					return fmt.Errorf("decoding response body: asked for %s and the server sent %s: %w", accept, ct, err)
 				}
 			}
 		}

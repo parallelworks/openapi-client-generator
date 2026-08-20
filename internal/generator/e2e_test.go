@@ -252,8 +252,10 @@ func TestE2E_TextPlainGeneration(t *testing.T) {
 	if !strings.Contains(clientContent, `resp.Header.Get("Content-Type")`) {
 		t.Error("client.go should check response Content-Type header")
 	}
-	if !strings.Contains(clientContent, `result.(*string)`) {
-		t.Error("client.go should have *string type assertion for text responses")
+	// A body typed as text or bytes is taken verbatim rather than parsed;
+	// e2e_response_media_test.go exercises what that does at runtime.
+	if !strings.Contains(clientContent, "isRawResult(result") {
+		t.Error("client.go should take a text or binary body verbatim")
 	}
 
 	t.Log("text/plain generated code compiles successfully")

@@ -520,6 +520,10 @@ func (a *Analyzer) convertSingleResponse(code string, resp *v3high.Response, nam
 
 	rd.Headers = convertResponseHeaders(resp)
 
+	if resp.Content != nil && resp.Content.Len() > 1 {
+		a.multiContentResponses++
+	}
+
 	if resp.Content != nil {
 		for contentType, mediaType := range resp.Content.FromOldest() {
 			if strings.Contains(contentType, "json") {
