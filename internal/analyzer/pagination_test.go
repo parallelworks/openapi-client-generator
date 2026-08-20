@@ -200,3 +200,92 @@ func TestContainsCI(t *testing.T) {
 		}
 	}
 }
+
+// itemsSpec builds a cursor-paginated operation whose page type declares the
+// given properties, so each case differs only in what the response holds.
+func itemsSpec(properties string) string {
+	return `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths:
+  /events:
+    get:
+      operationId: listEvents
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventPage" }
+components:
+  schemas:
+    EventPage:
+      type: object
+      properties:
+        nextCursor: { type: string }
+` + properties + `
+    Event:
+      type: object
+      properties: { id: { type: string } }
+`
+}
+
+func paginationOf(t *testing.T, spec string) *ir.PaginationDef {
+	t.Helper()
+	pkg, _ := analyzeSpec(t, spec)
+	for _, op := range pkg.Operations {
+		if op.Name == "ListEvents" {
+			return op.Pagination
+		}
+	}
+	t.Fatal("ListEvents operation not found")
+	return nil
+}
+
+func TestPaginationItems_ConventionalNameWins(t *testing.T) {
+	pd := paginationOf(t, itemsSpec(`        data: { type: array, items: { $ref: "#/components/schemas/Event" } }
+        warnings: { type: array, items: { type: string } }`))
+
+	if pd == nil || pd.ItemsField != "data" {
+		t.Errorf("items field = %+v, want data", pd)
+	}
+}
+
+func TestPaginationItems_LoneArrayIsThePage(t *testing.T) {
+	pd := paginationOf(t, itemsSpec(`        events: { type: array, items: { $ref: "#/components/schemas/Event" } }`))
+
+	if pd == nil || pd.ItemsField != "events" || pd.ItemsType != "Event" {
+		t.Errorf("items field = %+v, want events of Event", pd)
+	}
+}
+
+// A page holds records, so an array of a declared type beside an array of
+// scalars still identifies itself.
+func TestPaginationItems_RecordArrayBeatsScalarArrays(t *testing.T) {
+	pd := paginationOf(t, itemsSpec(`        warnings: { type: array, items: { type: string } }
+        events: { type: array, items: { $ref: "#/components/schemas/Event" } }`))
+
+	if pd == nil || pd.ItemsField != "events" {
+		t.Errorf("items field = %+v, want events rather than the first array declared", pd)
+	}
+}
+
+// Two arrays of records identify nothing. Paging over whichever the spec
+// declares first returns the wrong data, so the operation gets no iterator.
+func TestPaginationItems_AmbiguousArraysGetNoIterator(t *testing.T) {
+	pd := paginationOf(t, itemsSpec(`        warnings: { type: array, items: { $ref: "#/components/schemas/Event" } }
+        events: { type: array, items: { $ref: "#/components/schemas/Event" } }`))
+
+	if pd != nil {
+		t.Errorf("pagination = %+v, want none: neither array identifies the page", pd)
+	}
+}
+
+func TestPaginationItems_NoArrayGetsNoIterator(t *testing.T) {
+	pd := paginationOf(t, itemsSpec(`        total: { type: integer }`))
+
+	if pd != nil {
+		t.Errorf("pagination = %+v, want none: the response holds no page", pd)
+	}
+}

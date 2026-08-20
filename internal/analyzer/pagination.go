@@ -66,8 +66,10 @@ func (a *Analyzer) detectCursorPagination(op *ir.OperationDef, pkg *ir.Package) 
 		return nil
 	}
 
-	// Find the items field.
-	items := findItemsField(respType)
+	items := findItemsField(ir.TypesByName(pkg.Types), respType)
+	if items.name == "" {
+		return nil
+	}
 
 	return &ir.PaginationDef{
 		Style:       ir.PaginationStyleCursor,
@@ -120,9 +122,12 @@ func (a *Analyzer) detectOffsetPagination(op *ir.OperationDef, pkg *ir.Package) 
 // buildOffsetPagination builds an offset-style PaginationDef.
 func (a *Analyzer) buildOffsetPagination(op *ir.OperationDef, pkg *ir.Package, offsetParam, limitParam string) *ir.PaginationDef {
 	respType := a.findSuccessResponseType(op, pkg)
-	var items itemsFieldInfo
-	if respType != nil {
-		items = findItemsField(respType)
+	if respType == nil {
+		return nil
+	}
+	items := findItemsField(ir.TypesByName(pkg.Types), respType)
+	if items.name == "" {
+		return nil
 	}
 
 	return &ir.PaginationDef{
@@ -154,20 +159,43 @@ type itemsFieldInfo struct {
 }
 
 // findItemsField finds the name and element type of the array-typed field in a
-// response type that contains the paginated items.
-func findItemsField(td *ir.TypeDef) itemsFieldInfo {
+// response type that contains the paginated items. It returns the zero value
+// when nothing identifies one, which leaves the operation without an iterator
+// rather than paging over whichever array the spec happens to declare first.
+func findItemsField(byName map[string]*ir.TypeDef, td *ir.TypeDef) itemsFieldInfo {
+	var arrays []*ir.Field
 	for _, f := range td.Fields {
-		if containsCI(itemsFieldNames, f.JSONName) && strings.HasPrefix(f.Type, "[]") {
+		if !strings.HasPrefix(f.Type, "[]") {
+			continue
+		}
+		if containsCI(itemsFieldNames, f.JSONName) {
 			return itemsFieldInfo{name: f.JSONName, elemType: f.Type[2:]}
 		}
+		arrays = append(arrays, f)
 	}
-	// Fallback: find any array-typed field.
-	for _, f := range td.Fields {
-		if strings.HasPrefix(f.Type, "[]") {
-			return itemsFieldInfo{name: f.JSONName, elemType: f.Type[2:]}
-		}
+	// One array is the page by elimination.
+	if len(arrays) == 1 {
+		return itemsFieldInfo{name: arrays[0].JSONName, elemType: arrays[0].Type[2:]}
+	}
+	// A page holds records, so an array of a declared type beside arrays of
+	// scalars is still unambiguous. Two arrays of records are not, and guessing
+	// there returns the wrong data instead of failing.
+	if records := recordArrays(byName, arrays); len(records) == 1 {
+		return itemsFieldInfo{name: records[0].JSONName, elemType: records[0].Type[2:]}
 	}
 	return itemsFieldInfo{}
+}
+
+// recordArrays returns the array fields whose element type is a type the spec
+// declares rather than a builtin.
+func recordArrays(byName map[string]*ir.TypeDef, arrays []*ir.Field) []*ir.Field {
+	var records []*ir.Field
+	for _, f := range arrays {
+		if byName[ir.NamedType(f.Type[2:])] != nil {
+			records = append(records, f)
+		}
+	}
+	return records
 }
 
 // containsCI checks if any element in the list matches the target (case-insensitive).
