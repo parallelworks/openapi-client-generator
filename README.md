@@ -8,6 +8,7 @@ Given any OpenAPI 3.1 (or 3.0) spec, it outputs a complete, idiomatic Go client 
 
 - **Typed models** — structs, enums, type aliases, and union types (allOf/oneOf/anyOf) with JSON marshaling
 - **Client methods** — per-operation methods with `context.Context`, typed parameters, and typed responses
+- **Webhooks and callbacks**: typed payloads and a dispatcher for the requests the API sends you
 - **Server URLs**: `DefaultBaseURL` from the spec, with a builder for templated servers
 - **Response headers**: status and headers captured through the context, with declared headers parsed per operation
 - **Authentication** — `AuthProvider` interface with built-in Bearer, API key, and Basic auth
@@ -222,6 +223,33 @@ The marked property has to be a string, and the first one a schema marks is the
 one used. When it is empty, or the body does not parse, the output falls back to
 the raw body, so a message never disappears. `Detail` still holds the whole
 parsed body either way.
+
+### Webhooks and callbacks
+
+A spec's inbound half, `webhooks` and an operation's `callbacks`, describes
+requests the API sends to you. The generated package names their payload types
+and decodes them:
+
+```go
+// one webhook, its declared type, no assertion
+pet, err := petstore.ParsePetCreatedWebhook(body)
+
+// or dispatch on the name your router saw
+payload, err := petstore.ParseWebhook(name, body)
+switch p := payload.(type) {
+case petstore.Pet:
+    ...
+}
+```
+
+`WebhookNames` lists what the spec declares, and a name outside it is an error
+rather than a nil payload. Callbacks work the same way through `ParseCallback`
+and `CallbackNames`, keyed as `operation.callback`, since a callback arrives at a
+URL you registered rather than under a name of its own.
+
+Receiving is yours: the generator produces no HTTP handler and does not verify
+signatures, which are vendor specific and not described by a spec. A webhook with
+no JSON body to decode gets no parse function, and says so at generation time.
 
 ### Discriminated unions
 

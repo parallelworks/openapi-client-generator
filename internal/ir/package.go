@@ -10,6 +10,18 @@ type Package struct {
 	Info        *APIInfo        // API title, version, description
 	UserAgent   string          // Default User-Agent for generated clients
 	Warnings    []string        // Spec constructs the generator could not act on
+	Webhooks    []*WebhookDef   // Inbound payloads: webhooks and callbacks
+}
+
+// WebhookDef is one payload the API sends rather than receives: a webhook the
+// document declares, or a callback an operation registers.
+type WebhookDef struct {
+	Name        string // Dispatch key: the webhook's name, or operation.callback
+	GoName      string // Identifier fragment: Parse<GoName>Webhook
+	Callback    bool   // Whether this came from an operation's callbacks
+	Method      string // HTTP method the sender uses
+	PayloadType string // Go type the body decodes into
+	Description string
 }
 
 // ServerDef is one entry of the spec's servers list.
