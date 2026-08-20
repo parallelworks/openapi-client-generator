@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.8](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.7...v0.2.8) (2026-08-20)
+
+
+### Features
+
+* **generator:** response status and headers reach the caller ([#73](https://github.com/parallelworks/openapi-client-generator/issues/73)) ([13e598b](https://github.com/parallelworks/openapi-client-generator/commit/13e598b21d755f8730fc0e40ee095397e438fbb2))
+* **generator:** the client knows the server URL the spec declares ([#72](https://github.com/parallelworks/openapi-client-generator/issues/72)) ([dee1161](https://github.com/parallelworks/openapi-client-generator/commit/dee1161de57e21525db9e7331381a559f35b3383))
+* **generator:** unions expose a base even when the spec inlines the shared properties ([#59](https://github.com/parallelworks/openapi-client-generator/issues/59)) ([1264826](https://github.com/parallelworks/openapi-client-generator/commit/1264826523a8f19b83582b42206c055e511566bd))
+
+
+### Bug Fixes
+
+* **analyzer:** a security scheme the generator cannot use costs the whole client ([#64](https://github.com/parallelworks/openapi-client-generator/issues/64)) ([15a9c94](https://github.com/parallelworks/openapi-client-generator/commit/15a9c9471e443933b6886a8f8ac42e1c5108088a))
+* **generator:** error body with no type name emits code that is not Go ([#63](https://github.com/parallelworks/openapi-client-generator/issues/63)) ([11bcd44](https://github.com/parallelworks/openapi-client-generator/commit/11bcd4462953dbb4258347672db203dd0bc96ea7))
+* **pagination:** iterator paged whichever array the spec declared first ([#66](https://github.com/parallelworks/openapi-client-generator/issues/66)) ([fcc1e33](https://github.com/parallelworks/openapi-client-generator/commit/fcc1e338a83a8ffd64ed3e29ae45b9a594f2399c))
+
 ## [0.2.7](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.6...v0.2.7) (2026-08-19)
 
 
