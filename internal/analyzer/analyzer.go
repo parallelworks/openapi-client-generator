@@ -30,6 +30,10 @@ type Analyzer struct {
 	// before any conversion so a reference to a schema that has not been converted
 	// yet still resolves to the name it will end up with.
 	goNameBySchema map[string]string
+	// opNames fixes each operation's Go name the first time it is asked for, and
+	// opNamesTaken keeps two operations from landing on one method.
+	opNames      map[string]string
+	opNamesTaken map[string]bool
 	// multiContentResponses counts responses offering more than one media type,
 	// of which the generated method decodes one.
 	multiContentResponses int
@@ -53,6 +57,8 @@ func New(model *v3high.Document) *Analyzer {
 		synthesizedByKey:      make(map[string]*ir.TypeDef),
 		inlineMultipartBodies: make(map[string]bool),
 		goNameBySchema:        make(map[string]string),
+		opNames:               make(map[string]string),
+		opNamesTaken:          make(map[string]bool),
 	}
 }
 

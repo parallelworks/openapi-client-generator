@@ -3,6 +3,7 @@ package analyzer
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -335,12 +336,30 @@ func disambiguateParamNames(opDef *ir.OperationDef) {
 
 // operationName determines the Go method name for an operation.
 func (a *Analyzer) operationName(httpMethod, path string, op *v3high.Operation) string {
-	if op.OperationId != "" {
-		return naming.Exported(op.OperationId)
+	// Several passes ask for the same operation's name, and every identifier
+	// built from it has to agree with the method, so the answer is decided once.
+	key := httpMethod + " " + path
+	if name, ok := a.opNames[key]; ok {
+		return name
 	}
-	// Generate from HTTP method + path.
-	// e.g., GET /users/{id} → GetUsersByID
-	return naming.Exported(strings.ToLower(httpMethod) + " " + pathToWords(path))
+
+	base := naming.Exported(op.OperationId)
+	if op.OperationId == "" {
+		// Generate from HTTP method + path.
+		// e.g., GET /users/{id} → GetUsersByID
+		base = naming.Exported(strings.ToLower(httpMethod) + " " + pathToWords(path))
+	}
+
+	// Methods live in Client's method set rather than the package scope, so they
+	// are numbered against each other and not against a schema that happens to
+	// share the name.
+	name := base
+	for i := 2; a.opNamesTaken[name]; i++ {
+		name = base + strconv.Itoa(i)
+	}
+	a.opNamesTaken[name] = true
+	a.opNames[key] = name
+	return name
 }
 
 // pathToWords converts a URL path to space-separated words for naming.

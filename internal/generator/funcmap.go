@@ -693,6 +693,7 @@ func reservedQueryParams(op *ir.OperationDef) []*ir.ParamDef {
 func operationHeaders(op *ir.OperationDef) []*ir.ResponseHeaderDef {
 	var headers []*ir.ResponseHeaderDef
 	seen := map[string]bool{}
+	taken := map[string]bool{}
 	for _, resp := range op.Responses {
 		for _, h := range resp.Headers {
 			key := strings.ToLower(h.Name)
@@ -700,7 +701,16 @@ func operationHeaders(op *ir.OperationDef) []*ir.ResponseHeaderDef {
 				continue
 			}
 			seen[key] = true
-			headers = append(headers, h)
+
+			// Two header names that differ as spec keys can normalize to one Go
+			// field, which the struct they share would redeclare.
+			field := *h
+			base := field.GoName
+			for i := 2; taken[field.GoName]; i++ {
+				field.GoName = base + strconv.Itoa(i)
+			}
+			taken[field.GoName] = true
+			headers = append(headers, &field)
 		}
 	}
 	return headers
