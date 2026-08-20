@@ -312,6 +312,12 @@ func (u {{ .Name }}) Base() *{{ .BaseType }} {
 	return nil
 }
 {{ end }}
+// unionValue hands the decoded variant to the parameter encoders, which write
+// the value a union carries rather than the wrapper carrying it.
+func (u {{ .Name }}) unionValue() any {
+	return u.Value
+}
+
 // MarshalJSON implements json.Marshaler for {{ .Name }}.
 func (u {{ .Name }}) MarshalJSON() ([]byte, error) {
 {{- if .Discriminator }}

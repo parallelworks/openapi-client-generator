@@ -653,3 +653,66 @@ func TestLinks_WarnOncePerSpec(t *testing.T) {
 		t.Errorf("link warnings = %d, want 1: %v", linkWarnings, pkg.Warnings)
 	}
 }
+
+const unionParamAnalyzerSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - name: either
+          in: query
+          schema:
+            anyOf: [{ type: string }, { type: integer }]
+        - name: same
+          in: query
+          schema:
+            anyOf: [{ type: string }, { type: integer }]
+        - name: maybe
+          in: query
+          schema:
+            anyOf: [{ type: string }, { type: "null" }]
+        - name: shaped
+          in: query
+          schema:
+            type: object
+            properties:
+              lat: { type: number }
+              lon: { type: number }
+      responses:
+        "204": { description: ok }
+`
+
+// A parameter with a genuine choice of types names one, which is what makes it
+// constructible. A nullable union still collapses to its one variant.
+func TestUnionParam_NamesItsType(t *testing.T) {
+	pkg, typeMap := analyzeSpec(t, unionParamAnalyzerSpec)
+
+	params := make(map[string]*ir.ParamDef)
+	for _, op := range pkg.Operations {
+		for _, p := range op.QueryParams {
+			params[p.OrigName] = p
+		}
+	}
+
+	either := params["either"]
+	if either == nil || either.Type != "ListItemsEither" {
+		t.Fatalf("either type = %+v, want a named union", either)
+	}
+	if td := typeMap[either.Type]; td == nil || td.Kind != ir.TypeKindUnion {
+		t.Errorf("%s = %+v, want a generated union", either.Type, td)
+	}
+	// One shape is one type, so a second parameter of the same shape shares it.
+	if same := params["same"]; same == nil || same.Type != either.Type {
+		t.Errorf("same type = %+v, want %q", same, either.Type)
+	}
+	// Nullability is carried by the pointer, not by a union.
+	if maybe := params["maybe"]; maybe == nil || maybe.Type != "string" {
+		t.Errorf("maybe type = %+v, want string", maybe)
+	}
+	// An object written inline in a parameter is named for the same reason.
+	if shaped := params["shaped"]; shaped == nil || shaped.Type != "ListItemsShaped" {
+		t.Errorf("shaped type = %+v, want ListItemsShaped", shaped)
+	}
+}

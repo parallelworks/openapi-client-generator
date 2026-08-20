@@ -189,8 +189,9 @@ func TestNullableUnion_QueryParamsResolveToTheVariantType(t *testing.T) {
 		// Variants that are refinements of one Go type collapse to that type.
 		{"cookbook", "string"},
 		{"categories", "[]string"},
-		// A union with a real choice keeps its union handling.
-		{"either", "any"},
+		// A union with a real choice names a type, which is what makes the
+		// parameter constructible.
+		{"either", "ListRecipesEither"},
 	}
 	for _, tt := range tests {
 		p := params[tt.param]
