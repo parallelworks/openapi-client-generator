@@ -21,7 +21,10 @@ func (it *PageIterator[T]) Next() ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
-	if next == "" {
+	// A cursor that comes back unchanged means the page did not advance, which
+	// an echoed request cursor would otherwise turn into an endless run of
+	// identical requests.
+	if next == "" || next == it.nextCursor {
 		it.done = true
 	}
 	it.nextCursor = next
