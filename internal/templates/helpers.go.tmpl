@@ -379,6 +379,47 @@ func isRawResult(result any, body []byte) bool {
 	return false
 }
 
+// contentParamValue serializes a parameter declared with a media type rather than
+// a style. A nil optional pointer yields no value at all, which the callers skip.
+func contentParamValue(value any) (string, bool) {
+	rv, ok := derefParam(value)
+	if !ok {
+		return "", false
+	}
+	encoded, err := json.Marshal(rv.Interface())
+	if err != nil {
+		return "", false
+	}
+	return string(encoded), true
+}
+
+// addContentQueryParam adds a query parameter whose value is a serialized
+// document. The document goes in whole, percent-encoded by the query encoder.
+func addContentQueryParam(values url.Values, key string, value any) {
+	if encoded, ok := contentParamValue(value); ok {
+		values.Set(key, encoded)
+	}
+}
+
+// setContentHeader sets a header whose value is a serialized document.
+func setContentHeader(headers http.Header, name string, value any) {
+	if encoded, ok := contentParamValue(value); ok {
+		headers.Set(name, encoded)
+	}
+}
+
+// addContentCookieHeader appends a cookie whose value is a serialized document.
+func addContentCookieHeader(headers http.Header, name string, value any) {
+	if encoded, ok := contentParamValue(value); ok {
+		cookie := (&http.Cookie{Name: name, Value: encoded}).String()
+		if existing := headers.Get("Cookie"); existing != "" {
+			headers.Set("Cookie", existing+"; "+cookie)
+		} else {
+			headers.Set("Cookie", cookie)
+		}
+	}
+}
+
 // setHeader sets a header parameter (simple style), skipping a nil optional
 // pointer.
 func setHeader(headers http.Header, name string, explode bool, value any) {

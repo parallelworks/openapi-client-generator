@@ -60,6 +60,7 @@ func FuncMap() template.FuncMap {
 		"operationHeaders":        operationHeaders,
 		"inboundKinds":            inboundKinds,
 		"inboundPayloads":         inboundPayloads,
+		"serializedParam":         serializedParam,
 		"headerKinds":             headerKinds,
 		"headerDocComment":        headerDocComment,
 	}
@@ -658,6 +659,13 @@ func inboundPayloads(pkg *ir.Package, callback bool) []*ir.WebhookDef {
 		}
 	}
 	return defs
+
+}
+
+// serializedParam reports whether a parameter's value is written as a document in
+// the media type it declares, rather than encoded under an OpenAPI style.
+func serializedParam(p *ir.ParamDef) bool {
+	return strings.Contains(p.ContentType, "json")
 }
 
 // operationHeaders returns the headers an operation declares across all of its

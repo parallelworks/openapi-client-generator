@@ -33,6 +33,7 @@ type ParamDef struct {
 	Deprecated  bool
 	Style       string // serialization style
 	Explode     bool
+	ContentType string // Media type when the parameter is serialized with content rather than a style
 }
 
 // RequestBodyDef describes the request body.

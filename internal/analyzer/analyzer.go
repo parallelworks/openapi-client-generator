@@ -34,6 +34,8 @@ type Analyzer struct {
 	prefixItemsSeen           bool
 	dependentSchemasSeen      bool
 	manyPatternPropertiesSeen bool
+	// warnings collects what the generator had to skip, for the CLI to report.
+	warnings []string
 }
 
 // New creates an Analyzer for the given high-level OpenAPI model.
@@ -90,6 +92,8 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 	if err := a.analyzeSecuritySchemes(pkg); err != nil {
 		return nil, err
 	}
+
+	pkg.Warnings = append(pkg.Warnings, a.warnings...)
 
 	if a.multiContentResponses > 0 {
 		noun := "responses offer"
