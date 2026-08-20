@@ -28,6 +28,10 @@ func (a *Analyzer) analyzeOperations(pkg *ir.Package) error {
 				return fmt.Errorf("converting %s %s: %w", m.method, path, err)
 			}
 			pkg.Operations = append(pkg.Operations, opDef)
+
+			defs, warnings := a.callbackPayloads(opDef.Name, m.op)
+			pkg.Webhooks = append(pkg.Webhooks, defs...)
+			pkg.Warnings = append(pkg.Warnings, warnings...)
 		}
 	}
 
@@ -84,6 +88,10 @@ func (a *Analyzer) collectMultipartBodySchemas() map[string]bool {
 // reserveDerivedNames keeps a schema off the identifiers the templates build out
 // of an operation or an error body, which share the one package scope with it.
 func (a *Analyzer) reserveDerivedNames() {
+	for name, pathItem := range a.model.Webhooks.FromOldest() {
+		a.reserveInboundNames(naming.Exported(name), "Webhook", pathItem)
+	}
+
 	if a.model.Paths == nil || a.model.Paths.PathItems == nil {
 		return
 	}
@@ -93,6 +101,7 @@ func (a *Analyzer) reserveDerivedNames() {
 			opName := a.operationName(m.method, path, m.op)
 			a.namer.Reserve(opName + "Params")
 			a.namer.Reserve(opName + "Headers")
+			a.reserveCallbackNames(opName, m.op)
 
 			if m.op.Responses == nil || m.op.Responses.Codes == nil {
 				continue
@@ -103,6 +112,41 @@ func (a *Analyzer) reserveDerivedNames() {
 				}
 			}
 			a.reserveErrorResponseName(m.op.Responses.Default)
+		}
+	}
+}
+
+// reserveInboundNames reserves the identifiers webhooks.go declares for one
+// webhook or callback, so a schema named for one is renamed rather than
+// colliding with it.
+func (a *Analyzer) reserveInboundNames(goName, suffix string, pathItem *v3high.PathItem) {
+	if pathItem == nil {
+		return
+	}
+	ops := pathOperations(pathItem)
+	for _, m := range ops {
+		name := goName
+		if len(ops) > 1 {
+			name += naming.Exported(m.method)
+		}
+		// Only the function the template declares: the payload type is named
+		// through the namer like any other, so a schema that wants that name
+		// keeps it.
+		a.namer.Reserve("Parse" + name + suffix)
+	}
+}
+
+// reserveCallbackNames reserves what one operation's callbacks declare.
+func (a *Analyzer) reserveCallbackNames(opName string, op *v3high.Operation) {
+	if op.Callbacks == nil {
+		return
+	}
+	for callbackName, callback := range op.Callbacks.FromOldest() {
+		if callback == nil || callback.Expression == nil {
+			continue
+		}
+		for _, pathItem := range callback.Expression.FromOldest() {
+			a.reserveInboundNames(opName+naming.Exported(callbackName), "Callback", pathItem)
 		}
 	}
 }

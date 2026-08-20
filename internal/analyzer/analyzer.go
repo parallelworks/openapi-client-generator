@@ -79,6 +79,9 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 		return nil, err
 	}
 
+	// Payloads the API sends rather than receives.
+	a.analyzeWebhooks(pkg)
+
 	// Analyze security schemes.
 	if err := a.analyzeSecuritySchemes(pkg); err != nil {
 		return nil, err

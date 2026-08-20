@@ -68,6 +68,7 @@ func TestE2E_PetstoreGeneration(t *testing.T) {
 		"auth.go":       false,
 		"errors.go":     false,
 		"responses.go":  false,
+		"webhooks.go":   false,
 	}
 	for _, f := range files {
 		if _, ok := expectedFiles[f.Name]; ok {

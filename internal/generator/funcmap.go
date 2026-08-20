@@ -58,6 +58,8 @@ func FuncMap() template.FuncMap {
 		"primaryServer":           primaryServer,
 		"defaultBaseURL":          defaultBaseURL,
 		"operationHeaders":        operationHeaders,
+		"inboundKinds":            inboundKinds,
+		"inboundPayloads":         inboundPayloads,
 		"headerKinds":             headerKinds,
 		"headerDocComment":        headerDocComment,
 	}
@@ -621,6 +623,41 @@ func defaultBaseURL(pkg *ir.Package) string {
 		url = strings.ReplaceAll(url, "{"+v.Name+"}", v.Default)
 	}
 	return url
+}
+
+// InboundKind names one family of payloads the API sends: webhooks the document
+// declares, or callbacks an operation registers.
+type InboundKind struct {
+	Callback bool
+	Singular string
+	Plural   string
+	Suffix   string
+}
+
+// inboundKinds returns the families a package actually declares, so a spec with
+// only webhooks generates nothing about callbacks.
+func inboundKinds(pkg *ir.Package) []InboundKind {
+	var kinds []InboundKind
+	for _, kind := range []InboundKind{
+		{Callback: false, Singular: "webhook", Plural: "Webhook", Suffix: "Webhook"},
+		{Callback: true, Singular: "callback", Plural: "Callback", Suffix: "Callback"},
+	} {
+		if len(inboundPayloads(pkg, kind.Callback)) > 0 {
+			kinds = append(kinds, kind)
+		}
+	}
+	return kinds
+}
+
+// inboundPayloads returns one family's payloads.
+func inboundPayloads(pkg *ir.Package, callback bool) []*ir.WebhookDef {
+	var defs []*ir.WebhookDef
+	for _, w := range pkg.Webhooks {
+		if w.Callback == callback {
+			defs = append(defs, w)
+		}
+	}
+	return defs
 }
 
 // operationHeaders returns the headers an operation declares across all of its
