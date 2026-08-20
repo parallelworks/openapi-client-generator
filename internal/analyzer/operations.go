@@ -90,7 +90,9 @@ func (a *Analyzer) reserveDerivedNames() {
 
 	for path, pathItem := range a.model.Paths.PathItems.FromOldest() {
 		for _, m := range pathOperations(pathItem) {
-			a.namer.Reserve(a.operationName(m.method, path, m.op) + "Params")
+			opName := a.operationName(m.method, path, m.op)
+			a.namer.Reserve(opName + "Params")
+			a.namer.Reserve(opName + "Headers")
 
 			if m.op.Responses == nil || m.op.Responses.Codes == nil {
 				continue
@@ -516,6 +518,8 @@ func (a *Analyzer) convertSingleResponse(code string, resp *v3high.Response, nam
 		Description: resp.Description,
 	}
 
+	rd.Headers = convertResponseHeaders(resp)
+
 	if resp.Content != nil {
 		for contentType, mediaType := range resp.Content.FromOldest() {
 			if strings.Contains(contentType, "json") {
@@ -538,6 +542,48 @@ func (a *Analyzer) convertSingleResponse(code string, resp *v3high.Response, nam
 	}
 
 	return rd
+}
+
+// convertResponseHeaders lowers the headers a response declares. A header value
+// arrives as text, so only the kinds text parses into unambiguously are typed;
+// everything else, dates and lists included, stays the raw string.
+func convertResponseHeaders(resp *v3high.Response) []*ir.ResponseHeaderDef {
+	if resp.Headers == nil {
+		return nil
+	}
+	var headers []*ir.ResponseHeaderDef
+	for name, header := range resp.Headers.FromOldest() {
+		if header == nil {
+			continue
+		}
+		hd := &ir.ResponseHeaderDef{
+			Name:        name,
+			GoName:      naming.Exported(name),
+			Type:        "string",
+			Description: header.Description,
+			Required:    header.Required,
+		}
+		if header.Schema != nil {
+			if schema, err := header.Schema.BuildSchema(); err == nil && schema != nil {
+				hd.Type = headerGoType(schema)
+			}
+		}
+		headers = append(headers, hd)
+	}
+	return headers
+}
+
+// headerGoType maps a header's schema to the Go type its value parses into.
+func headerGoType(schema *highbase.Schema) string {
+	switch primaryType(schema) {
+	case "integer":
+		return "int64"
+	case "number":
+		return "float64"
+	case "boolean":
+		return "bool"
+	}
+	return "string"
 }
 
 // resolveMediaTypeSchema extracts the Go type name from a media type's schema.

@@ -8,6 +8,7 @@ Given any OpenAPI 3.1 (or 3.0) spec, it outputs a complete, idiomatic Go client 
 
 - **Typed models** — structs, enums, type aliases, and union types (allOf/oneOf/anyOf) with JSON marshaling
 - **Client methods** — per-operation methods with `context.Context`, typed parameters, and typed responses
+- **Response headers**: status and headers captured through the context, with declared headers parsed per operation
 - **Authentication** — `AuthProvider` interface with built-in Bearer, API key, and Basic auth
 - **Error handling** — `APIError` with sentinel errors (`errors.Is`), typed error wrappers with parsed response bodies (`errors.As`)
 - **Pagination** — auto-detected cursor/offset pagination with generic `PageIterator[T]`
@@ -130,6 +131,34 @@ func main() {
     }
 }
 ```
+
+### Response headers
+
+A method returns the decoded body, so what a response says outside its body is
+read through a capture on the context:
+
+```go
+ctx, meta := petstore.WithResponseCapture(ctx)
+pet, err := client.CreatePet(ctx, newPet)
+
+meta.StatusCode                        // 201
+meta.Header.Get("X-Trace-Id")          // any header, declared or not
+```
+
+Headers the spec declares are also available parsed, per operation:
+
+```go
+h := meta.CreatePetHeaders()
+h.Location                             // string
+h.XRateLimitRemaining                  // *int64, nil when absent
+```
+
+A header value arrives as text, so only the kinds text parses into unambiguously
+are typed: integers, numbers, and booleans, each a pointer so an absent header is
+not a zero that reads as a real value. Everything else, HTTP dates and lists
+included, stays the raw string. Error responses are captured too, which is where
+a rate limit usually arrives. Calls made with the returned context each overwrite
+the meta, so give one capture to one call.
 
 ### Discriminated unions
 

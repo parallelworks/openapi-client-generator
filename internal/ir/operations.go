@@ -56,10 +56,11 @@ type ResponseDef struct {
 
 // ResponseHeaderDef describes a response header.
 type ResponseHeaderDef struct {
-	Name     string
-	GoName   string
-	Type     string
-	Required bool
+	Name        string
+	GoName      string
+	Type        string // string, int64, float64, or bool
+	Description string
+	Required    bool
 }
 
 // SecurityReq represents a single security requirement.
