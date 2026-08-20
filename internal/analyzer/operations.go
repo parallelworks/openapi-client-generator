@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	highbase "github.com/pb33f/libopenapi/datamodel/high/base"
 	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
@@ -475,6 +477,7 @@ func (a *Analyzer) convertResponses(responses *v3high.Responses, opDef *ir.Opera
 				}
 			} else if isErrorCode(code) {
 				rd.IsError = true
+				rd.ErrorWrapper = a.errorWrapperName(rd.TypeName, hint)
 				opDef.ErrorResponses = append(opDef.ErrorResponses, rd)
 			}
 		}
@@ -482,11 +485,28 @@ func (a *Analyzer) convertResponses(responses *v3high.Responses, opDef *ir.Opera
 
 	// Handle the default response.
 	if responses.Default != nil {
-		rd := a.convertSingleResponse("default", responses.Default, opName+"DefaultResponse")
+		hint := opName + "DefaultResponse"
+		rd := a.convertSingleResponse("default", responses.Default, hint)
 		rd.IsError = true
+		rd.ErrorWrapper = a.errorWrapperName(rd.TypeName, hint)
 		opDef.Responses = append(opDef.Responses, rd)
 		opDef.ErrorResponses = append(opDef.ErrorResponses, rd)
 	}
+}
+
+// errorWrapperName returns the type name for the wrapper that carries an error
+// body parsed into Detail. A body whose Go type is a map, a slice, or a builtin
+// has no name an identifier can be built from, so the wrapper takes the
+// operation's instead of pasting the type expression into the declaration.
+func (a *Analyzer) errorWrapperName(typeName, hint string) string {
+	if typeName == "" {
+		return ""
+	}
+	named := ir.NamedType(typeName)
+	if r, _ := utf8.DecodeRuneInString(named); unicode.IsUpper(r) {
+		return named + "Response"
+	}
+	return a.namer.Unique(naming.Exported(hint) + "Error")
 }
 
 // convertSingleResponse converts one response code/definition to an ir.ResponseDef.

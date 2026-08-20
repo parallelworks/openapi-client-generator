@@ -612,18 +612,26 @@ func paginationCursorField(op *ir.OperationDef) string {
 }
 
 // uniqueErrorTypes returns deduplicated error response type names from all operations.
-func uniqueErrorTypes(pkg *ir.Package) []string {
+func uniqueErrorTypes(pkg *ir.Package) []ErrorWrapper {
 	seen := map[string]bool{}
-	var types []string
+	var wrappers []ErrorWrapper
 	for _, op := range pkg.Operations {
 		for _, resp := range op.ErrorResponses {
-			if resp.TypeName != "" && !seen[resp.TypeName] {
-				seen[resp.TypeName] = true
-				types = append(types, resp.TypeName)
+			if resp.ErrorWrapper == "" || seen[resp.ErrorWrapper] {
+				continue
 			}
+			seen[resp.ErrorWrapper] = true
+			wrappers = append(wrappers, ErrorWrapper{Name: resp.ErrorWrapper, Detail: resp.TypeName})
 		}
 	}
-	return types
+	return wrappers
+}
+
+// ErrorWrapper is one generated error type: the name it declares and the type of
+// the body it parses into.
+type ErrorWrapper struct {
+	Name   string
+	Detail string
 }
 
 // errorMessageField returns the error type's string field annotated with
@@ -645,8 +653,8 @@ func errorMessageField(pkg *ir.Package, typeName string) *ir.Field {
 // errorType returns the error response type name for an operation, or "".
 func errorType(op *ir.OperationDef) string {
 	for _, resp := range op.ErrorResponses {
-		if resp.TypeName != "" {
-			return resp.TypeName
+		if resp.ErrorWrapper != "" {
+			return resp.ErrorWrapper
 		}
 	}
 	return ""
