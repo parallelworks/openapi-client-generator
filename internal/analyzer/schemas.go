@@ -192,7 +192,7 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 		if refName != "" {
 			// $ref to a known component schema: add as embedded field.
 			goTypeName := a.goTypeForSchemaName(refName)
-			td.Fields = append(td.Fields, &ir.Field{
+			td.Fields = addField(td.Fields, &ir.Field{
 				Name:     goTypeName,
 				Type:     goTypeName,
 				Embedded: true,
@@ -227,7 +227,7 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 				continue
 			}
 
-			td.Fields = append(td.Fields, a.convertProperty(goName, propName, propSchema, requiredSet[propName], multipartBody))
+			td.Fields = addField(td.Fields, a.convertProperty(goName, propName, propSchema, requiredSet[propName], multipartBody))
 		}
 	}
 
@@ -429,7 +429,7 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 			continue
 		}
 
-		td.Fields = append(td.Fields, a.convertProperty(goName, propName, propSchema, requiredSet[propName], multipartBody))
+		td.Fields = addField(td.Fields, a.convertProperty(goName, propName, propSchema, requiredSet[propName], multipartBody))
 	}
 
 	// The generator gives a struct with a catch-all MarshalJSON/UnmarshalJSON so
@@ -472,14 +472,29 @@ func (a *Analyzer) patternPropertiesType(schema *highbase.Schema, nameHint strin
 // catchAllFieldName picks a Go name for the synthetic additionalProperties field
 // that no declared property has already taken.
 func catchAllFieldName(fields []*ir.Field) string {
-	name := "AdditionalProperties"
+	return uniqueFieldName(fields, "AdditionalProperties")
+}
+
+// addField appends a field under a name no other field in the struct holds. Two
+// properties can differ on the wire and still normalize to one Go identifier,
+// which the compiler rejects as a redeclaration; the JSON tag is untouched, so
+// only the Go name moves.
+func addField(fields []*ir.Field, f *ir.Field) []*ir.Field {
+	f.Name = uniqueFieldName(fields, f.Name)
+	return append(fields, f)
+}
+
+// uniqueFieldName returns name, or the first numbered variant of it that the
+// struct does not already declare.
+func uniqueFieldName(fields []*ir.Field, name string) string {
 	taken := func(candidate string) bool {
 		return slices.ContainsFunc(fields, func(f *ir.Field) bool { return f.Name == candidate })
 	}
-	for i := 2; taken(name); i++ {
-		name = "AdditionalProperties" + strconv.Itoa(i)
+	candidate := name
+	for i := 2; taken(candidate); i++ {
+		candidate = name + strconv.Itoa(i)
 	}
-	return name
+	return candidate
 }
 
 // formFileType returns the Go type for a multipart property carrying file content.
