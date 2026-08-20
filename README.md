@@ -8,6 +8,7 @@ Given any OpenAPI 3.1 (or 3.0) spec, it outputs a complete, idiomatic Go client 
 
 - **Typed models** — structs, enums, type aliases, and union types (allOf/oneOf/anyOf) with JSON marshaling
 - **Client methods** — per-operation methods with `context.Context`, typed parameters, and typed responses
+- **Server URLs**: `DefaultBaseURL` from the spec, with a builder for templated servers
 - **Response headers**: status and headers captured through the context, with declared headers parsed per operation
 - **Authentication** — `AuthProvider` interface with built-in Bearer, API key, and Basic auth
 - **Error handling** — `APIError` with sentinel errors (`errors.Is`), typed error wrappers with parsed response bodies (`errors.As`)
@@ -132,6 +133,35 @@ func main() {
 }
 ```
 
+### Server URLs
+
+When the spec declares a server, the generated package states it, so the URL does
+not have to be copied into the code:
+
+```go
+client := petstore.NewClient(petstore.DefaultBaseURL)
+```
+
+`DefaultBaseURL` is the first server the spec lists, with every template variable
+at its default. A templated server also gets a builder, one parameter per
+variable in the order the URL uses them, where an empty argument takes that
+variable's default:
+
+```yaml
+servers:
+  - url: https://{region}.api.example.com/{basePath}
+    variables:
+      region:   { default: us-east-1, enum: [us-east-1, eu-west-1] }
+      basePath: { default: v2 }
+```
+
+```go
+client := petstore.NewClient(petstore.ServerURL("eu-west-1", ""))
+// https://eu-west-1.api.example.com/v2
+```
+
+A relative server URL (`/api/v3`) gets neither, since it resolves against
+wherever the spec is served and the generated package cannot know that host.
 ### Response headers
 
 A method returns the decoded body, so what a response says outside its body is

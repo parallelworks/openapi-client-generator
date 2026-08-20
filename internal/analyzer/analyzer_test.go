@@ -44,8 +44,8 @@ func TestAnalyzePetstore(t *testing.T) {
 	if pkg.Info.Version != "1.0.0" {
 		t.Errorf("pkg.Info.Version = %q, want %q", pkg.Info.Version, "1.0.0")
 	}
-	if len(pkg.ServerURLs) != 1 || pkg.ServerURLs[0] != "https://petstore.example.com/v1" {
-		t.Errorf("pkg.ServerURLs = %v, want [https://petstore.example.com/v1]", pkg.ServerURLs)
+	if len(pkg.Servers) != 1 || pkg.Servers[0].URL != "https://petstore.example.com/v1" {
+		t.Errorf("pkg.Servers = %v, want one server at https://petstore.example.com/v1", pkg.Servers)
 	}
 
 	if len(pkg.Types) == 0 {
