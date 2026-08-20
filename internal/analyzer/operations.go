@@ -70,7 +70,7 @@ func (a *Analyzer) collectMultipartBodySchemas() map[string]bool {
 		return names
 	}
 
-	for _, pathItem := range a.model.Paths.PathItems.FromOldest() {
+	for path, pathItem := range a.model.Paths.PathItems.FromOldest() {
 		for _, m := range pathOperations(pathItem) {
 			if m.op.RequestBody == nil {
 				continue
@@ -79,7 +79,15 @@ func (a *Analyzer) collectMultipartBodySchemas() map[string]bool {
 			if !strings.HasPrefix(contentType, "multipart/") || mediaType == nil || mediaType.Schema == nil {
 				continue
 			}
-			a.markMultipartSchema(names, refToSchemaName(mediaType.Schema.GetReference()), 0)
+			if ref := mediaType.Schema.GetReference(); ref != "" {
+				a.markMultipartSchema(names, refToSchemaName(ref), 0)
+				continue
+			}
+			// An inline body has no schema name to mark, so it is recorded under
+			// the name its synthesized type will be built from. Without this the
+			// body is converted as if it were JSON, and its files go out as
+			// base64 text in ordinary fields.
+			a.inlineMultipartBodies[a.operationName(m.method, path, m.op)+"Body"] = true
 		}
 	}
 	return names

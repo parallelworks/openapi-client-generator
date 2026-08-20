@@ -23,6 +23,9 @@ type Analyzer struct {
 	synthesizedByKey map[string]*ir.TypeDef
 	// multipartBodies holds the schema names a multipart request body refers to.
 	multipartBodies map[string]bool
+	// inlineMultipartBodies holds the naming hints of multipart bodies written
+	// inline, which have no schema name to record instead.
+	inlineMultipartBodies map[string]bool
 	// goNameBySchema maps every component schema to its Go type name, filled in
 	// before any conversion so a reference to a schema that has not been converted
 	// yet still resolves to the name it will end up with.
@@ -44,11 +47,12 @@ type Analyzer struct {
 // New creates an Analyzer for the given high-level OpenAPI model.
 func New(model *v3high.Document) *Analyzer {
 	return &Analyzer{
-		model:            model,
-		namer:            naming.NewScope(templates.ReservedIdentifiers...),
-		typesBySchema:    make(map[string]*ir.TypeDef),
-		synthesizedByKey: make(map[string]*ir.TypeDef),
-		goNameBySchema:   make(map[string]string),
+		model:                 model,
+		namer:                 naming.NewScope(templates.ReservedIdentifiers...),
+		typesBySchema:         make(map[string]*ir.TypeDef),
+		synthesizedByKey:      make(map[string]*ir.TypeDef),
+		inlineMultipartBodies: make(map[string]bool),
+		goNameBySchema:        make(map[string]string),
 	}
 }
 

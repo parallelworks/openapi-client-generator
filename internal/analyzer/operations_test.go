@@ -716,3 +716,75 @@ func TestUnionParam_NamesItsType(t *testing.T) {
 		t.Errorf("shaped type = %+v, want ListItemsShaped", shaped)
 	}
 }
+
+const inlineMultipartAnalyzerSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths:
+  /upload:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+                meta:
+                  type: object
+                  properties:
+                    thumbnail: { type: string, format: binary }
+      responses:
+        "204": { description: ok }
+  /json:
+    post:
+      operationId: sendJSON
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                blob: { type: string, format: binary }
+      responses:
+        "204": { description: ok }
+`
+
+// Multipart is a property of where a schema is used, not of the schema, and an
+// inline body had no name to record that under.
+func TestInlineMultipart_BinaryPropertyBecomesAFilePart(t *testing.T) {
+	_, typeMap := analyzeSpec(t, inlineMultipartAnalyzerSpec)
+
+	body := typeMap["UploadBody"]
+	if body == nil {
+		t.Fatal("UploadBody not found")
+	}
+	fields := map[string]string{}
+	for _, f := range body.Fields {
+		fields[f.JSONName] = f.Type
+	}
+	// Optional here, so a pointer, but a file part either way.
+	if fields["file"] != "*FormFile" {
+		t.Errorf("file = %q, want *FormFile", fields["file"])
+	}
+
+	// A nested object is encoded as JSON, so bytes inside it stay bytes.
+	nested := typeMap["UploadBodyMeta"]
+	if nested == nil {
+		t.Fatal("UploadBodyMeta not found")
+	}
+	if nested.Fields[0].Type != "[]byte" {
+		t.Errorf("nested thumbnail = %q, want []byte", nested.Fields[0].Type)
+	}
+
+	// The same shape sent as JSON keeps byte slices throughout.
+	jsonBody := typeMap["SendJSONBody"]
+	if jsonBody == nil {
+		t.Fatal("SendJSONBody not found")
+	}
+	if jsonBody.Fields[0].Type != "[]byte" {
+		t.Errorf("json blob = %q, want []byte", jsonBody.Fields[0].Type)
+	}
+}

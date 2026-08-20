@@ -720,6 +720,10 @@ func (a *Analyzer) synthesizeInlineUnion(schema *highbase.Schema, nameHint strin
 // the properties it lists stay typed instead of collapsing into any. Two
 // declarations of one shape share a type.
 func (a *Analyzer) synthesizeInlineObject(schema *highbase.Schema, nameHint string) (string, bool) {
+	// Multipart is a property of where the schema is used, so it is looked up
+	// under the hint the request body passed, before a title renames it.
+	multipartBody := a.inlineMultipartBodies[nameHint]
+
 	// A titled schema names itself, which keeps the generated name stable when
 	// the property that reaches it first is renamed.
 	if schema.Title != "" {
@@ -735,7 +739,7 @@ func (a *Analyzer) synthesizeInlineObject(schema *highbase.Schema, nameHint stri
 	}
 
 	goName := a.namer.Unique(naming.Exported(nameHint))
-	td, err := a.convertObject(goName, schema, false, false)
+	td, err := a.convertObject(goName, schema, false, multipartBody)
 	if err != nil || td == nil {
 		return "", false
 	}
