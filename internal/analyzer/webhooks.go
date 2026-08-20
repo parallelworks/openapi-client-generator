@@ -68,6 +68,10 @@ func (a *Analyzer) inboundPayloads(name, goName string, callback bool, pathItem 
 			methodKey += "." + m.method
 		}
 
+		// Two spec keys can normalize to one Go name, and the parse functions
+		// built from it share the package scope.
+		methodName = a.namer.Unique(methodName)
+
 		payloadType, ok := a.inboundPayloadType(m.op, methodName)
 		if !ok {
 			warnings = append(warnings, fmt.Sprintf("%s %q: no JSON request body to decode, so no parse function is generated", inboundKind(callback), methodKey))

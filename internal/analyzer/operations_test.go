@@ -788,3 +788,64 @@ func TestInlineMultipart_BinaryPropertyBecomesAFilePart(t *testing.T) {
 		t.Errorf("json blob = %q, want []byte", jsonBody.Fields[0].Type)
 	}
 }
+
+const collidingOperationSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths:
+  /a-b:
+    get:
+      responses: { "204": { description: ok } }
+  /a_b:
+    get:
+      responses: { "204": { description: ok } }
+  /dup:
+    get:
+      operationId: sameName
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+      responses: { "204": { description: ok } }
+  /dup2:
+    get:
+      operationId: same-name
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+      responses: { "204": { description: ok } }
+`
+
+// Two operations can derive one method name, from paths that differ only in
+// punctuation or from operation ids that normalize together.
+func TestOperationNames_CollisionsAreNumbered(t *testing.T) {
+	pkg, typeMap := analyzeSpec(t, collidingOperationSpec)
+
+	var names []string
+	for _, op := range pkg.Operations {
+		names = append(names, op.Name)
+	}
+	want := []string{"GetAB", "GetAB2", "SameName", "SameName2"}
+	if len(names) != len(want) {
+		t.Fatalf("operations = %v, want %v", names, want)
+	}
+	for i, w := range want {
+		if names[i] != w {
+			t.Errorf("operation %d = %q, want %q", i, names[i], w)
+		}
+	}
+
+	// The names params types are built from have to follow the method, or the
+	// two would disagree about which operation they belong to.
+	for _, name := range []string{"SameName", "SameName2"} {
+		var op *ir.OperationDef
+		for _, candidate := range pkg.Operations {
+			if candidate.Name == name {
+				op = candidate
+			}
+		}
+		if op == nil {
+			t.Fatalf("%s not found", name)
+		}
+		if len(op.QueryParams) != 1 {
+			t.Errorf("%s params = %+v", name, op.QueryParams)
+		}
+	}
+	_ = typeMap
+}
