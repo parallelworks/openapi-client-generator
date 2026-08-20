@@ -218,6 +218,7 @@ components:
         - type: object
           properties:
             q: { type: string }
+        - description: anything at all
 `
 
 // TestE2E_UntypedUnionVariantStillDecodes covers a union member the analyzer
@@ -232,14 +233,30 @@ import (
 	"testing"
 )
 
-func TestUntypedVariantDecodes(t *testing.T) {
+func TestInlineObjectVariantIsTyped(t *testing.T) {
 	var m Mixed
 	if err := json.Unmarshal([]byte(`+"`"+`{"q":"x"}`+"`"+`), &m); err != nil {
 		t.Fatalf("a payload matching the inline object variant failed to decode: %v", err)
 	}
-	obj, ok := m.Value.(map[string]any)
-	if !ok || obj["q"] != "x" {
-		t.Errorf("Value = %#v, want the decoded object", m.Value)
+	obj, ok := m.Value.(MixedVariant)
+	if !ok {
+		t.Fatalf("Value = %#v, want the named struct the inline variant declares", m.Value)
+	}
+	if obj.Q == nil || *obj.Q != "x" {
+		t.Errorf("Q = %v, want x", obj.Q)
+	}
+}
+
+// A variant that declares nothing has no Go type of its own, and the payloads it
+// covers still have to decode.
+func TestUntypedVariantDecodes(t *testing.T) {
+	var m Mixed
+	if err := json.Unmarshal([]byte(`+"`"+`[1,2,3]`+"`"+`), &m); err != nil {
+		t.Fatalf("a payload matching only the untyped variant failed to decode: %v", err)
+	}
+	items, ok := m.Value.([]any)
+	if !ok || len(items) != 3 {
+		t.Errorf("Value = %#v, want the decoded array", m.Value)
 	}
 }
 

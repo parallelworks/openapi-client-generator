@@ -581,9 +581,12 @@ func (a *Analyzer) resolveGoType(schema *highbase.Schema, nameHint string) strin
 			}
 			return "map[string]any"
 		}
-		// Complex inline object -- for now use any. Full support would create
-		// an anonymous struct or a named type.
-		return "any"
+		if name, ok := a.synthesizeInlineObject(schema, nameHint); ok {
+			return name
+		}
+		// With no hint there is no name to declare the struct under, so the
+		// properties are reachable only as map keys.
+		return "map[string]any"
 	case "array":
 		elemType := "any"
 		if schema.Items != nil && schema.Items.IsA() {
@@ -666,6 +669,61 @@ func (a *Analyzer) synthesizeInlineUnion(schema *highbase.Schema, nameHint strin
 	a.synthesizedByKey[key] = td
 	a.synthesized = append(a.synthesized, td)
 	return goName, true
+}
+
+// synthesizeInlineObject declares a named struct for an object written inline, so
+// the properties it lists stay typed instead of collapsing into any. Two
+// declarations of one shape share a type.
+func (a *Analyzer) synthesizeInlineObject(schema *highbase.Schema, nameHint string) (string, bool) {
+	// A titled schema names itself, which keeps the generated name stable when
+	// the property that reaches it first is renamed.
+	if schema.Title != "" {
+		nameHint = schema.Title
+	}
+	if nameHint == "" {
+		return "", false
+	}
+
+	key := a.inlineObjectKey(schema, nameHint)
+	if existing, ok := a.synthesizedByKey[key]; ok {
+		return existing.Name, true
+	}
+
+	goName := a.namer.Unique(naming.Exported(nameHint))
+	td, err := a.convertObject(goName, schema, false, false)
+	if err != nil || td == nil {
+		return "", false
+	}
+	a.synthesizedByKey[key] = td
+	a.synthesized = append(a.synthesized, td)
+	return goName, true
+}
+
+// inlineObjectKey identifies an inline object by the Go it would generate, so two
+// properties declaring the same shape land on one type rather than two names for
+// it.
+func (a *Analyzer) inlineObjectKey(schema *highbase.Schema, nameHint string) string {
+	required := make(map[string]bool, len(schema.Required))
+	for _, r := range schema.Required {
+		required[r] = true
+	}
+
+	var b strings.Builder
+	b.WriteString("object")
+	for propName, propProxy := range schema.Properties.FromOldest() {
+		propSchema, err := propProxy.BuildSchema()
+		if err != nil || propSchema == nil {
+			continue
+		}
+		b.WriteString("|" + propName + ":" + a.resolveGoType(propSchema, nameHint+naming.Exported(propName)))
+		if required[propName] {
+			b.WriteString(":required")
+		}
+	}
+	if allowsAdditionalProperties(schema) {
+		b.WriteString("|additional:" + a.resolveAdditionalPropertiesType(schema, nameHint))
+	}
+	return b.String()
 }
 
 // suffixHint appends a suffix to a naming hint, preserving emptiness so that

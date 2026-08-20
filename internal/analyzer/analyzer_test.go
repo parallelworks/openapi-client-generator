@@ -800,6 +800,9 @@ func TestComplexSchemas_AllTypesPresent(t *testing.T) {
 		// Circle and Rectangle both declare shapeType, and the body union
 		// dispatches on kind, so the shared property becomes a base.
 		"CreateShapeBodyBase",
+		// StringOrInt's two members are objects written inline, each of which
+		// declares a property and so names a struct.
+		"StringOrIntVariant", "StringOrIntVariant2",
 	}
 
 	if len(pkg.Types) != len(expectedTypes) {
