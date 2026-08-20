@@ -163,7 +163,7 @@ func (c *Client) do(ctx context.Context, method string, path string, body any, c
 		}
 
 		// Check if we should retry.
-		if c.retryConfig != nil && attempt < maxAttempts-1 && shouldRetryStatus(method, resp.StatusCode, *c.retryConfig) {
+		if c.retryConfig != nil && attempt < maxAttempts-1 && shouldRetryStatus(method, resp.StatusCode, *c.retryConfig) && withinRetryBudget(resp, *c.retryConfig) {
 			delay := retryDelay(attempt, *c.retryConfig, resp)
 			timer := time.NewTimer(delay)
 			select {
