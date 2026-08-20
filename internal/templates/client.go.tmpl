@@ -13,6 +13,31 @@ import (
 	"time"
 )
 
+{{- with defaultBaseURL $ }}
+// DefaultBaseURL is the server this API declares first, with every template
+// variable at its default value.
+const DefaultBaseURL = {{ printf "%q" . }}
+{{ end }}
+{{- with primaryServer $ }}{{ if .Variables }}
+// ServerURL builds the URL of the server this API declares first, substituting
+// its template variables. An empty argument takes that variable's default.
+{{- range .Variables }}
+//
+// {{ .Name }}{{ if .Default }} defaults to {{ .Default }}{{ end }}{{ if .Enum }}, one of: {{ range $i, $e := .Enum }}{{ if $i }}, {{ end }}{{ $e }}{{ end }}{{ end }}.
+{{- end }}
+func ServerURL({{ range $i, $v := .Variables }}{{ if $i }}, {{ end }}{{ $v.GoName }} string{{ end }}) string {
+	url := {{ printf "%q" .URL }}
+{{- range .Variables }}
+{{- if .Default }}
+	if {{ .GoName }} == "" {
+		{{ .GoName }} = {{ printf "%q" .Default }}
+	}
+{{- end }}
+	url = strings.ReplaceAll(url, {{ printf "%q" (printf "{%s}" .Name) }}, {{ .GoName }})
+{{- end }}
+	return url
+}
+{{ end }}{{ end }}
 // Client is an API client for {{ if .Info }}{{ .Info.Title }}{{ else }}the service{{ end }}.
 type Client struct {
 	baseURL     string

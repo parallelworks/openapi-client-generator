@@ -55,12 +55,7 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 		}
 	}
 
-	// Extract server URLs.
-	for _, server := range a.model.Servers {
-		if server != nil {
-			pkg.ServerURLs = append(pkg.ServerURLs, server.URL)
-		}
-	}
+	pkg.Servers = a.convertServers()
 
 	// A multipart body's binary properties are generated as file parts rather
 	// than as byte slices, which has to be settled before the schemas holding

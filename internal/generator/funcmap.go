@@ -55,6 +55,8 @@ func FuncMap() template.FuncMap {
 		"successContentType":      successContentType,
 		"requestContentType":      requestContentType,
 		"hasNonJSONBody":          hasNonJSONBody,
+		"primaryServer":           primaryServer,
+		"defaultBaseURL":          defaultBaseURL,
 		"operationHeaders":        operationHeaders,
 		"headerKinds":             headerKinds,
 		"headerDocComment":        headerDocComment,
@@ -588,6 +590,37 @@ func unionBaseFields(pkg *ir.Package, td *ir.TypeDef) []*ir.Field {
 		return nil
 	}
 	return base.Fields
+}
+
+// primaryServer returns the server the spec presents first, which is the one the
+// generated client defaults to. It returns nil when the spec declares none.
+func primaryServer(pkg *ir.Package) *ir.ServerDef {
+	if len(pkg.Servers) == 0 {
+		return nil
+	}
+	return pkg.Servers[0]
+}
+
+// defaultBaseURL returns the primary server's URL with every template variable
+// at its default, or "" when a variable has no default to substitute.
+func defaultBaseURL(pkg *ir.Package) string {
+	server := primaryServer(pkg)
+	if server == nil {
+		return ""
+	}
+	// A relative server URL is resolved against wherever the spec is served, which
+	// a generated constant cannot stand in for.
+	url := server.URL
+	if !strings.Contains(url, "://") {
+		return ""
+	}
+	for _, v := range server.Variables {
+		if v.Default == "" {
+			return ""
+		}
+		url = strings.ReplaceAll(url, "{"+v.Name+"}", v.Default)
+	}
+	return url
 }
 
 // operationHeaders returns the headers an operation declares across all of its
