@@ -16,7 +16,7 @@ Given any OpenAPI 3.1 (or 3.0) spec, it outputs a complete, idiomatic Go client 
 - **Pagination** — auto-detected cursor/offset pagination with generic `PageIterator[T]`
 - **Retries** — configurable exponential backoff with jitter and `Retry-After` header support
 - **Middleware** — composable request/response middleware chain
-- **OpenAPI 3.1** — full support for JSON Schema 2020-12, nullable type arrays, `$ref` resolution
+- **OpenAPI 3.1**: JSON Schema 2020-12, nullable type arrays, `$ref` resolution ([what is not generated](#not-supported))
 
 ## Installation
 
@@ -299,6 +299,20 @@ A payload that carries no discriminator property at all is still an error — th
 is nothing to identify it by — as is a union *without* a discriminator when no
 variant matches. When the schema declares a `discriminator` but no `mapping`, the
 variant's schema name is used as the discriminator value, per the OpenAPI spec.
+
+## Not supported
+
+Constructs the generator reads and does not act on. Each one warns at generation
+time rather than passing silently:
+
+| Construct | Behavior |
+|---|---|
+| `prefixItems` | The array stays a slice of one element type. A tuple has no Go shape a slice can hold. |
+| `dependentSchemas` | Not enforced. A property whose shape depends on another is a validation rule, not a type. |
+| `patternProperties` with several patterns | The map takes an `any` value type, since the patterns disagree about what a key holds. One pattern types the map. |
+| `links` | Read and not used. Following a link is a decision for the caller, not a generated method. |
+| `webhooks`, `callbacks` | Not generated. |
+| `mutualTLS` security scheme | No auth provider. The certificate is configured on the `http.Client`. |
 
 ## License
 

@@ -389,6 +389,8 @@ func (a *Analyzer) convertUnion(goName string, schema *highbase.Schema, variants
 
 // convertObject creates a struct TypeDef from an object schema.
 func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullable, multipartBody bool) (*ir.TypeDef, error) {
+	a.noteUnsupportedKeywords(schema)
+
 	// If no defined properties and additionalProperties is set, generate a map alias.
 	hasProperties := schema.Properties != nil && schema.Properties.Len() > 0
 	if !hasProperties && allowsAdditionalProperties(schema) {
@@ -436,9 +438,28 @@ func (a *Analyzer) convertObject(goName string, schema *highbase.Schema, nullabl
 func allowsAdditionalProperties(schema *highbase.Schema) bool {
 	ap := schema.AdditionalProperties
 	if ap == nil {
-		return false
+		// patternProperties admits keys the same way, so a schema with one is
+		// still an object with undeclared members.
+		return schema.PatternProperties != nil && schema.PatternProperties.Len() > 0
 	}
 	return !ap.IsB() || ap.B
+}
+
+// patternPropertiesType returns the value type a schema's patternProperties
+// implies. One pattern types every key it admits; several disagree about what a
+// key holds, and a map has one value type, so those fall back to any.
+func (a *Analyzer) patternPropertiesType(schema *highbase.Schema, nameHint string) string {
+	if schema.PatternProperties == nil || schema.PatternProperties.Len() != 1 {
+		return "any"
+	}
+	for _, proxy := range schema.PatternProperties.FromOldest() {
+		patternSchema, err := proxy.BuildSchema()
+		if err != nil || patternSchema == nil {
+			return "any"
+		}
+		return a.resolveGoType(patternSchema, suffixHint(nameHint, "Value"))
+	}
+	return "any"
 }
 
 // catchAllFieldName picks a Go name for the synthetic additionalProperties field
@@ -494,11 +515,11 @@ func (a *Analyzer) convertAdditionalPropertiesMap(goName string, schema *highbas
 func (a *Analyzer) resolveAdditionalPropertiesType(schema *highbase.Schema, nameHint string) string {
 	ap := schema.AdditionalProperties
 	if ap == nil {
-		return "any"
+		return a.patternPropertiesType(schema, nameHint)
 	}
 	// Bool true means any value type.
 	if ap.IsB() {
-		return "any"
+		return a.patternPropertiesType(schema, nameHint)
 	}
 	// Schema-typed additionalProperties.
 	if ap.IsA() && ap.A != nil {
@@ -549,7 +570,24 @@ func (a *Analyzer) convertPrimitive(goName, primaryType string, schema *highbase
 // to known types, arrays, primitives, and inline unions. nameHint carries the
 // naming context (parent type + field) used when a type must be synthesized;
 // pass "" when no context is available.
+// noteUnsupportedKeywords records the JSON Schema keywords the generator reads
+// and cannot express in a Go type, so the spec's author hears about it once
+// rather than discovering it in the output.
+func (a *Analyzer) noteUnsupportedKeywords(schema *highbase.Schema) {
+	if len(schema.PrefixItems) > 0 {
+		a.prefixItemsSeen = true
+	}
+	if schema.DependentSchemas != nil && schema.DependentSchemas.Len() > 0 {
+		a.dependentSchemasSeen = true
+	}
+	if schema.PatternProperties != nil && schema.PatternProperties.Len() > 1 {
+		a.manyPatternPropertiesSeen = true
+	}
+}
+
 func (a *Analyzer) resolveGoType(schema *highbase.Schema, nameHint string) string {
+	a.noteUnsupportedKeywords(schema)
+
 	// Check if this schema is a $ref pointing to a known component schema.
 	if goType := a.refGoType(schema); goType != "" {
 		return goType
