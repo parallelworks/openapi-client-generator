@@ -30,6 +30,10 @@ type Analyzer struct {
 	// multiContentResponses counts responses offering more than one media type,
 	// of which the generated method decodes one.
 	multiContentResponses int
+	// Keywords read and not expressible in a Go type, reported once per spec.
+	prefixItemsSeen           bool
+	dependentSchemasSeen      bool
+	manyPatternPropertiesSeen bool
 }
 
 // New creates an Analyzer for the given high-level OpenAPI model.
@@ -90,6 +94,19 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 			noun = "response offers"
 		}
 		pkg.Warnings = append(pkg.Warnings, fmt.Sprintf("%d %s more than one media type; each generated method requests and decodes one, preferring JSON", a.multiContentResponses, noun))
+	}
+
+	for _, note := range []struct {
+		seen bool
+		text string
+	}{
+		{a.prefixItemsSeen, "prefixItems describes a tuple, which has no Go shape a struct can hold, so those arrays stay slices of one element type"},
+		{a.dependentSchemasSeen, "dependentSchemas makes a property's shape conditional, which a Go struct cannot express, so it is not enforced"},
+		{a.manyPatternPropertiesSeen, "patternProperties with more than one pattern disagrees about what a key holds, so those maps take an any value type"},
+	} {
+		if note.seen {
+			pkg.Warnings = append(pkg.Warnings, note.text)
+		}
 	}
 
 	// Append union types synthesized for inline oneOf/anyOf schemas.
