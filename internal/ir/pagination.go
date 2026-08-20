@@ -5,7 +5,10 @@ type PaginationStyle int
 
 const (
 	PaginationStyleCursor PaginationStyle = iota
+	// PaginationStyleOffset advances by the number of items received.
 	PaginationStyleOffset
+	// PaginationStylePage advances by one page, whatever a page holds.
+	PaginationStylePage
 )
 
 // PaginationDef describes pagination for an operation.
@@ -14,7 +17,8 @@ type PaginationDef struct {
 	// For cursor-based:
 	CursorParam string // Query param name for the cursor
 	CursorField string // Response field containing next cursor
-	// For offset-based:
+	// For offset-based and page-based: the parameter that advances, and the one
+	// that sizes a page.
 	OffsetParam string
 	LimitParam  string
 	// Common:

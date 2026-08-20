@@ -98,7 +98,7 @@ func (a *Analyzer) detectOffsetPagination(op *ir.OperationDef, pkg *ir.Package) 
 		limitParam = orig
 	}
 	if offsetParam != "" && limitParam != "" {
-		return a.buildOffsetPagination(op, pkg, offsetParam, limitParam)
+		return a.buildOffsetPagination(op, pkg, ir.PaginationStyleOffset, offsetParam, limitParam)
 	}
 
 	// Check for page + (per_page | page_size | pageSize | limit) pattern.
@@ -112,15 +112,17 @@ func (a *Analyzer) detectOffsetPagination(op *ir.OperationDef, pkg *ir.Package) 
 
 	for _, name := range []string{"per_page", "page_size", "pagesize", "limit"} {
 		if orig, ok := queryNames[name]; ok {
-			return a.buildOffsetPagination(op, pkg, pageParam, orig)
+			return a.buildOffsetPagination(op, pkg, ir.PaginationStylePage, pageParam, orig)
 		}
 	}
 
 	return nil
 }
 
-// buildOffsetPagination builds an offset-style PaginationDef.
-func (a *Analyzer) buildOffsetPagination(op *ir.OperationDef, pkg *ir.Package, offsetParam, limitParam string) *ir.PaginationDef {
+// buildOffsetPagination builds a PaginationDef for the styles that count rather
+// than follow a cursor. The style decides how the parameter advances: an offset
+// by the items received, a page by one.
+func (a *Analyzer) buildOffsetPagination(op *ir.OperationDef, pkg *ir.Package, style ir.PaginationStyle, offsetParam, limitParam string) *ir.PaginationDef {
 	respType := a.findSuccessResponseType(op, pkg)
 	if respType == nil {
 		return nil
@@ -131,7 +133,7 @@ func (a *Analyzer) buildOffsetPagination(op *ir.OperationDef, pkg *ir.Package, o
 	}
 
 	return &ir.PaginationDef{
-		Style:       ir.PaginationStyleOffset,
+		Style:       style,
 		OffsetParam: offsetParam,
 		LimitParam:  limitParam,
 		ItemsField:  items.name,
