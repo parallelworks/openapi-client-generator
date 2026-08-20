@@ -55,6 +55,9 @@ func FuncMap() template.FuncMap {
 		"successContentType":      successContentType,
 		"requestContentType":      requestContentType,
 		"hasNonJSONBody":          hasNonJSONBody,
+		"operationHeaders":        operationHeaders,
+		"headerKinds":             headerKinds,
+		"headerDocComment":        headerDocComment,
 	}
 }
 
@@ -585,6 +588,46 @@ func unionBaseFields(pkg *ir.Package, td *ir.TypeDef) []*ir.Field {
 		return nil
 	}
 	return base.Fields
+}
+
+// operationHeaders returns the headers an operation declares across all of its
+// responses, in declaration order and once each. The accessor hangs off the
+// captured response, which may be an error response, so a header declared only
+// on a 429 is as reachable as one declared on the 200.
+func operationHeaders(op *ir.OperationDef) []*ir.ResponseHeaderDef {
+	var headers []*ir.ResponseHeaderDef
+	seen := map[string]bool{}
+	for _, resp := range op.Responses {
+		for _, h := range resp.Headers {
+			key := strings.ToLower(h.Name)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			headers = append(headers, h)
+		}
+	}
+	return headers
+}
+
+// headerKinds returns the non-string header types the package parses, so only
+// the parse helpers that are called get generated.
+func headerKinds(pkg *ir.Package) []string {
+	var kinds []string
+	for _, kind := range []string{"int64", "float64", "bool"} {
+		for _, op := range pkg.Operations {
+			if slices.ContainsFunc(operationHeaders(op), func(h *ir.ResponseHeaderDef) bool { return h.Type == kind }) {
+				kinds = append(kinds, kind)
+				break
+			}
+		}
+	}
+	return kinds
+}
+
+// headerDocComment renders a header's description as a field doc comment.
+func headerDocComment(h *ir.ResponseHeaderDef) string {
+	return fieldDocComment(&ir.Field{Name: h.GoName, Description: h.Description})
 }
 
 // discriminatorFieldName converts a JSON property name to a Go field name

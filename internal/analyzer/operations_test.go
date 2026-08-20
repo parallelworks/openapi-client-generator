@@ -423,3 +423,66 @@ func TestDisambiguateParamNames_StructFields(t *testing.T) {
 		t.Errorf("OrigName changed to %q, want %q", got, "user_id")
 	}
 }
+
+const headerDeclSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths:
+  /things:
+    get:
+      operationId: listThings
+      responses:
+        "200":
+          description: ok
+          headers:
+            X-Request-Id: { schema: { type: string } }
+            X-Rate-Limit-Remaining: { schema: { type: integer } }
+            X-Ratio: { schema: { type: number } }
+            X-Deprecated: { schema: { type: boolean } }
+            Last-Modified: { schema: { type: string, format: date-time } }
+            X-Tags: { schema: { type: array, items: { type: string } } }
+          content:
+            application/json: { schema: { type: string } }
+`
+
+// A header arrives as text, so only the kinds text parses into unambiguously are
+// typed. An HTTP date is not RFC 3339 and a list is comma-joined, so both stay
+// the raw string rather than a type that would misread them.
+func TestResponseHeaders_TypedOnlyWhereTextParses(t *testing.T) {
+	pkg, _ := analyzeSpec(t, headerDeclSpec)
+
+	var headers []*ir.ResponseHeaderDef
+	for _, op := range pkg.Operations {
+		for _, resp := range op.Responses {
+			headers = append(headers, resp.Headers...)
+		}
+	}
+	byName := make(map[string]*ir.ResponseHeaderDef, len(headers))
+	for _, h := range headers {
+		byName[h.Name] = h
+	}
+	if len(byName) != 6 {
+		t.Fatalf("headers = %d, want 6", len(byName))
+	}
+
+	want := map[string]string{
+		"X-Request-Id":           "string",
+		"X-Rate-Limit-Remaining": "int64",
+		"X-Ratio":                "float64",
+		"X-Deprecated":           "bool",
+		"Last-Modified":          "string",
+		"X-Tags":                 "string",
+	}
+	for name, kind := range want {
+		h := byName[name]
+		if h == nil {
+			t.Errorf("%s: not analyzed", name)
+			continue
+		}
+		if h.Type != kind {
+			t.Errorf("%s type = %q, want %q", name, h.Type, kind)
+		}
+	}
+	if byName["X-Request-Id"].GoName != "XRequestID" {
+		t.Errorf("X-Request-Id GoName = %q, want XRequestID", byName["X-Request-Id"].GoName)
+	}
+}
