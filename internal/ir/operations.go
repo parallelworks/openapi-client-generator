@@ -45,12 +45,13 @@ type RequestBodyDef struct {
 
 // ResponseDef describes one response.
 type ResponseDef struct {
-	StatusCode  string // "200", "404", "default", etc.
-	Description string
-	ContentType string
-	TypeName    string // Go type for the response body (empty if no body)
-	IsError     bool   // Whether this is an error response (4xx/5xx)
-	Headers     []*ResponseHeaderDef
+	StatusCode   string // "200", "404", "default", etc.
+	Description  string
+	ContentType  string
+	TypeName     string // Go type for the response body (empty if no body)
+	ErrorWrapper string // Go type name of the generated wrapper carrying the parsed body
+	IsError      bool   // Whether this is an error response (4xx/5xx)
+	Headers      []*ResponseHeaderDef
 }
 
 // ResponseHeaderDef describes a response header.
