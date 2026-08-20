@@ -14,7 +14,7 @@ Given any OpenAPI 3.1 (or 3.0) spec, it outputs a complete, idiomatic Go client 
 - **Authentication** — `AuthProvider` interface with built-in Bearer, API key, and Basic auth
 - **Error handling** — `APIError` with sentinel errors (`errors.Is`), typed error wrappers with parsed response bodies (`errors.As`), readable messages via `x-ms-primary-error-message`
 - **Pagination**: auto-detected cursor, offset, and page pagination with a generic `PageIterator[T]`
-- **Retries** — configurable exponential backoff with jitter and `Retry-After` header support
+- **Retries**: configurable exponential backoff with jitter, honoring `Retry-After` in both forms and declining a wait past `MaxDelay`
 - **Middleware** — composable request/response middleware chain
 - **OpenAPI 3.1**: JSON Schema 2020-12, nullable type arrays, `$ref` resolution ([what is not generated](#not-supported))
 

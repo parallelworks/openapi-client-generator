@@ -75,13 +75,8 @@ func shouldRetryStatus(method string, statusCode int, cfg RetryConfig) bool {
 
 // retryDelay calculates delay with exponential backoff, jitter, and Retry-After support.
 func retryDelay(attempt int, cfg RetryConfig, resp *http.Response) time.Duration {
-	// Check Retry-After header first.
-	if resp != nil {
-		if ra := resp.Header.Get("Retry-After"); ra != "" {
-			if seconds, err := strconv.Atoi(ra); err == nil && seconds > 0 {
-				return time.Duration(seconds) * time.Second
-			}
-		}
+	if wait, ok := retryAfter(resp); ok {
+		return wait
 	}
 
 	// Exponential backoff with jitter.
@@ -95,6 +90,40 @@ func retryDelay(attempt int, cfg RetryConfig, resp *http.Response) time.Duration
 	delay = (delay + jitter) / 2
 
 	return time.Duration(delay)
+}
+
+// retryAfter returns the wait a response asks for, in either form RFC 9110
+// allows, and whether it asked at all. A zero wait is an instruction like any
+// other: retry now.
+func retryAfter(resp *http.Response) (time.Duration, bool) {
+	if resp == nil {
+		return 0, false
+	}
+	raw := resp.Header.Get("Retry-After")
+	if raw == "" {
+		return 0, false
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil {
+		if seconds < 0 {
+			return 0, false
+		}
+		return time.Duration(seconds) * time.Second, true
+	}
+	if at, err := http.ParseTime(raw); err == nil {
+		// A date already in the past says retry now, not retry in the past.
+		return max(time.Until(at), 0), true
+	}
+	return 0, false
+}
+
+// withinRetryBudget reports whether waiting as long as the response asks for is
+// something this client agreed to. A wait past MaxDelay is not capped, since
+// retrying sooner than a server asked is what the header exists to prevent: the
+// call returns its error instead, leaving the caller to schedule the work with
+// the header in hand.
+func withinRetryBudget(resp *http.Response, cfg RetryConfig) bool {
+	wait, ok := retryAfter(resp)
+	return !ok || wait <= cfg.MaxDelay
 }
 
 // isIdempotentMethod reports whether method is safe to retry after a transient network error (POST is not).
