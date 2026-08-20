@@ -410,17 +410,18 @@ func (a *Analyzer) convertParam(param *v3high.Parameter, opName string) (*ir.Par
 	style, explode := effectiveStyleExplode(param)
 
 	return &ir.ParamDef{
-		Name:        naming.Unexported(param.Name),
-		FieldName:   naming.Exported(param.Name),
-		OrigName:    param.Name,
-		Location:    param.In,
-		Type:        goType,
-		Required:    required,
-		Description: param.Description,
-		Deprecated:  param.Deprecated,
-		Style:       style,
-		Explode:     explode,
-		ContentType: contentType,
+		Name:          naming.Unexported(param.Name),
+		FieldName:     naming.Exported(param.Name),
+		OrigName:      param.Name,
+		Location:      param.In,
+		Type:          goType,
+		Required:      required,
+		Description:   param.Description,
+		Deprecated:    param.Deprecated,
+		Style:         style,
+		Explode:       explode,
+		ContentType:   contentType,
+		AllowReserved: param.AllowReserved,
 	}, nil
 }
 
@@ -587,6 +588,10 @@ func (a *Analyzer) convertSingleResponse(code string, resp *v3high.Response, nam
 
 	if resp.Content != nil && resp.Content.Len() > 1 {
 		a.multiContentResponses++
+	}
+
+	if resp.Links != nil && resp.Links.Len() > 0 {
+		a.linksSeen = true
 	}
 
 	if resp.Content != nil {

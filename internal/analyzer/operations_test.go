@@ -602,3 +602,54 @@ func TestContentParam_CarriesItsMediaTypeAndSchema(t *testing.T) {
 		t.Errorf("plain param = %+v, want no content type", plain)
 	}
 }
+
+const allowReservedAnalyzerSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths:
+  /lookup:
+    get:
+      operationId: lookup
+      parameters:
+        - { name: ref, in: query, allowReserved: true, schema: { type: string } }
+        - { name: plain, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: ok
+          links:
+            next: { operationId: lookup }
+          content:
+            application/json: { schema: { type: string } }
+`
+
+func TestAllowReserved_ReachesTheParam(t *testing.T) {
+	pkg, _ := analyzeSpec(t, allowReservedAnalyzerSpec)
+
+	params := make(map[string]*ir.ParamDef)
+	for _, op := range pkg.Operations {
+		for _, p := range op.QueryParams {
+			params[p.OrigName] = p
+		}
+	}
+	if ref := params["ref"]; ref == nil || !ref.AllowReserved {
+		t.Errorf("ref param = %+v, want AllowReserved", ref)
+	}
+	if plain := params["plain"]; plain == nil || plain.AllowReserved {
+		t.Errorf("plain param = %+v, want AllowReserved unset", plain)
+	}
+}
+
+// Links are declared in bulk and the answer is the same for all of them, so the
+// spec earns one warning rather than one per response.
+func TestLinks_WarnOncePerSpec(t *testing.T) {
+	pkg, _ := analyzeSpec(t, allowReservedAnalyzerSpec)
+
+	var linkWarnings int
+	for _, w := range pkg.Warnings {
+		if strings.Contains(w, "links") {
+			linkWarnings++
+		}
+	}
+	if linkWarnings != 1 {
+		t.Errorf("link warnings = %d, want 1: %v", linkWarnings, pkg.Warnings)
+	}
+}

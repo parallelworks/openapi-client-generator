@@ -36,6 +36,9 @@ type Analyzer struct {
 	manyPatternPropertiesSeen bool
 	// warnings collects what the generator had to skip, for the CLI to report.
 	warnings []string
+	// linksSeen records that the spec describes response links, which the
+	// generated client does not act on.
+	linksSeen bool
 }
 
 // New creates an Analyzer for the given high-level OpenAPI model.
@@ -114,6 +117,12 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 		if note.seen {
 			pkg.Warnings = append(pkg.Warnings, note.text)
 		}
+	}
+
+	if a.linksSeen {
+		// One warning for the spec, not one per response: links are declared in
+		// bulk and the answer is the same for all of them.
+		pkg.Warnings = append(pkg.Warnings, "the spec declares response links, which the generated client does not follow")
 	}
 
 	// Append union types synthesized for inline oneOf/anyOf schemas.

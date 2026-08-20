@@ -254,6 +254,59 @@ func encodeQuery(values url.Values) string {
 	return strings.ReplaceAll(values.Encode(), "+", "%20")
 }
 
+// reservedPassthrough are the RFC 3986 reserved characters a parameter marked
+// allowReserved sends unescaped. The separators a query string is itself parsed
+// with are missing on purpose: passing "&", "=", or "#" through would end the
+// value early, and "+" reads as a space, so a value carrying any of them would
+// arrive as something other than what was sent.
+const reservedPassthrough = `:/?[]@!$'()*,;`
+
+// encodeQueryAllowingReserved renders the query with the named keys' values left
+// unescaped over the reserved set. Every other key is encoded as usual.
+func encodeQueryAllowingReserved(values url.Values, reservedKeys ...string) string {
+	reserved := make(map[string]bool, len(reservedKeys))
+	for _, k := range reservedKeys {
+		reserved[k] = true
+	}
+
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var b strings.Builder
+	for _, k := range keys {
+		for _, v := range values[k] {
+			if b.Len() > 0 {
+				b.WriteByte('&')
+			}
+			b.WriteString(url.QueryEscape(k))
+			b.WriteByte('=')
+			if reserved[k] {
+				b.WriteString(escapeAllowingReserved(v))
+			} else {
+				b.WriteString(strings.ReplaceAll(url.QueryEscape(v), "+", "%20"))
+			}
+		}
+	}
+	return b.String()
+}
+
+// escapeAllowingReserved percent-encodes a value except for the reserved
+// characters the spec says to pass through.
+func escapeAllowingReserved(value string) string {
+	var b strings.Builder
+	for i := 0; i < len(value); i++ {
+		if c := value[i]; strings.IndexByte(reservedPassthrough, c) >= 0 {
+			b.WriteByte(c)
+			continue
+		}
+		b.WriteString(strings.ReplaceAll(url.QueryEscape(string(value[i])), "+", "%20"))
+	}
+	return b.String()
+}
+
 // queryDelim is the separator for an unexploded array under a query style.
 func queryDelim(style string) string {
 	switch style {
