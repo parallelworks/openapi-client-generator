@@ -38,7 +38,7 @@ type {{ .Name }}Params struct {
 {{ else }}	addQueryParam(queryValues, "{{ .OrigName }}", "{{ .Style }}", {{ .Explode }}, params.{{ .FieldName }})
 {{ end }}
 {{ end }}	if len(queryValues) > 0 {
-		path += "?" + encodeQuery(queryValues)
+		path += "?" + {{ if reservedQueryParams . }}encodeQueryAllowingReserved(queryValues{{ range reservedQueryParams . }}, {{ printf "%q" .OrigName }}{{ end }}){{ else }}encodeQuery(queryValues){{ end }}
 	}
 {{ end }}
 {{- if $needHeaders }}	headers := make(http.Header)

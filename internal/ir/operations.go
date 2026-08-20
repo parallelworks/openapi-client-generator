@@ -34,6 +34,8 @@ type ParamDef struct {
 	Style       string // serialization style
 	Explode     bool
 	ContentType string // Media type when the parameter is serialized with content rather than a style
+	// AllowReserved sends RFC 3986 reserved characters through unescaped.
+	AllowReserved bool
 }
 
 // RequestBodyDef describes the request body.

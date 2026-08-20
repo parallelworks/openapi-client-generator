@@ -61,6 +61,7 @@ func FuncMap() template.FuncMap {
 		"inboundKinds":            inboundKinds,
 		"inboundPayloads":         inboundPayloads,
 		"serializedParam":         serializedParam,
+		"reservedQueryParams":     reservedQueryParams,
 		"headerKinds":             headerKinds,
 		"headerDocComment":        headerDocComment,
 	}
@@ -666,6 +667,19 @@ func inboundPayloads(pkg *ir.Package, callback bool) []*ir.WebhookDef {
 // the media type it declares, rather than encoded under an OpenAPI style.
 func serializedParam(p *ir.ParamDef) bool {
 	return strings.Contains(p.ContentType, "json")
+
+}
+
+// reservedQueryParams returns the query parameters a spec marks allowReserved,
+// whose values keep their reserved characters instead of being escaped.
+func reservedQueryParams(op *ir.OperationDef) []*ir.ParamDef {
+	var params []*ir.ParamDef
+	for _, p := range op.QueryParams {
+		if p.AllowReserved {
+			params = append(params, p)
+		}
+	}
+	return params
 }
 
 // operationHeaders returns the headers an operation declares across all of its
