@@ -364,6 +364,21 @@ func pathSep(explode bool, exploded string) string {
 	return ","
 }
 
+// isRawResult fills a result the operation types as bytes or text with the body
+// as it arrived, reporting whether it did. Such a body is the value itself, not
+// a document to parse.
+func isRawResult(result any, body []byte) bool {
+	switch v := result.(type) {
+	case *[]byte:
+		*v = body
+		return true
+	case *string:
+		*v = string(body)
+		return true
+	}
+	return false
+}
+
 // setHeader sets a header parameter (simple style), skipping a nil optional
 // pointer.
 func setHeader(headers http.Header, name string, explode bool, value any) {

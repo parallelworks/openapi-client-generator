@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
@@ -484,5 +485,52 @@ func TestResponseHeaders_TypedOnlyWhereTextParses(t *testing.T) {
 	}
 	if byName["X-Request-Id"].GoName != "XRequestID" {
 		t.Errorf("X-Request-Id GoName = %q, want XRequestID", byName["X-Request-Id"].GoName)
+	}
+}
+
+const multiMediaResponseSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths:
+  /docs:
+    get:
+      operationId: getDoc
+      responses:
+        "200":
+          description: ok
+          content:
+            application/xml: { schema: { type: string } }
+            application/json: { schema: { type: string } }
+  /one:
+    get:
+      operationId: getOne
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { type: string } }
+`
+
+// A response offering several media types still decodes one, and the author
+// hears which rather than discovering it from the Accept header.
+func TestMultiMediaResponse_PrefersJSONAndSaysSo(t *testing.T) {
+	pkg, _ := analyzeSpec(t, multiMediaResponseSpec)
+
+	for _, op := range pkg.Operations {
+		if op.Name == "GetDoc" && op.SuccessResponse.ContentType != "application/json" {
+			t.Errorf("GetDoc content type = %q, want application/json even though XML comes first", op.SuccessResponse.ContentType)
+		}
+	}
+
+	var found int
+	for _, w := range pkg.Warnings {
+		if strings.Contains(w, "more than one media type") {
+			found++
+			if !strings.Contains(w, "1 response offers") {
+				t.Errorf("warning = %q, want it to count the one response that offers several", w)
+			}
+		}
+	}
+	if found != 1 {
+		t.Errorf("media type warnings = %d, want 1: %v", found, pkg.Warnings)
 	}
 }

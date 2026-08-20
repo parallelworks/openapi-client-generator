@@ -27,6 +27,9 @@ type Analyzer struct {
 	// before any conversion so a reference to a schema that has not been converted
 	// yet still resolves to the name it will end up with.
 	goNameBySchema map[string]string
+	// multiContentResponses counts responses offering more than one media type,
+	// of which the generated method decodes one.
+	multiContentResponses int
 }
 
 // New creates an Analyzer for the given high-level OpenAPI model.
@@ -79,6 +82,14 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 	// Analyze security schemes.
 	if err := a.analyzeSecuritySchemes(pkg); err != nil {
 		return nil, err
+	}
+
+	if a.multiContentResponses > 0 {
+		noun := "responses offer"
+		if a.multiContentResponses == 1 {
+			noun = "response offers"
+		}
+		pkg.Warnings = append(pkg.Warnings, fmt.Sprintf("%d %s more than one media type; each generated method requests and decodes one, preferring JSON", a.multiContentResponses, noun))
 	}
 
 	// Append union types synthesized for inline oneOf/anyOf schemas.
