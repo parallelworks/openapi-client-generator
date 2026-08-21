@@ -41,6 +41,7 @@ type Analyzer struct {
 	prefixItemsSeen           bool
 	dependentSchemasSeen      bool
 	manyPatternPropertiesSeen bool
+	conditionalSchemasSeen    bool
 	// warnings collects what the generator had to skip, for the CLI to report.
 	warnings []string
 	// linksSeen records that the spec describes response links, which the
@@ -123,6 +124,7 @@ func (a *Analyzer) Analyze(packageName string) (*ir.Package, error) {
 		{a.prefixItemsSeen, "prefixItems describes a tuple, which has no Go shape a struct can hold, so those arrays stay slices of one element type"},
 		{a.dependentSchemasSeen, "dependentSchemas makes a property's shape conditional, which a Go struct cannot express, so it is not enforced"},
 		{a.manyPatternPropertiesSeen, "patternProperties with more than one pattern disagrees about what a key holds, so those maps take an any value type"},
+		{a.conditionalSchemasSeen, "if/then/else makes a shape depend on a value, which a Go struct cannot express, so it is not enforced"},
 	} {
 		if note.seen {
 			pkg.Warnings = append(pkg.Warnings, note.text)
