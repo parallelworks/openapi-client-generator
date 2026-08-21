@@ -77,6 +77,8 @@ func TestE2E_Combinations(t *testing.T) {
 		{"operations.go", "params.Either", "a union-typed parameter"},
 		{"errors.go", "func (e *ProblemResponse) Error() string", "a typed error wrapper"},
 		{"errors.go", "e.Detail.Detail", "a message field found by its conventional name"},
+		{"errors.go", "func parseFailureResponse", "a second error shape in one package"},
+		{"errors.go", "func parseListAlertsResponse422Error", "an error body with no name of its own"},
 		{"types.go", "Name string `json:\"name\"`", "a property two allOf entries declare, required by one"},
 	} {
 		if !containsCollapsed(byName[want.file], want.decl) {
@@ -98,4 +100,53 @@ func TestE2E_Combinations(t *testing.T) {
 // depend on alignment that has not happened yet.
 func containsCollapsed(haystack, needle string) bool {
 	return strings.Contains(strings.Join(strings.Fields(haystack), " "), strings.Join(strings.Fields(needle), " "))
+}
+
+// TestGenerationIsDeterministic generates one spec twice and compares the bytes.
+// Generated clients are committed and reviewed, so output that shifts between
+// runs shows up as churn in a diff nobody made, and the usual cause is a map
+// iterated somewhere on the way out.
+func TestGenerationIsDeterministic(t *testing.T) {
+	specPath := filepath.Join(projectRoot(), "testdata", "combinations.yaml")
+
+	generate := func() map[string]string {
+		t.Helper()
+		result, err := parser.Parse(specPath, parser.Config{})
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		pkg, err := analyzer.New(result.Model).Analyze("combinations")
+		if err != nil {
+			t.Fatalf("Analyze: %v", err)
+		}
+		gen, err := New(pkg)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		files, err := gen.Generate()
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		out := make(map[string]string, len(files))
+		for _, f := range files {
+			out[f.Name] = string(f.Content)
+		}
+		return out
+	}
+
+	first, second := generate(), generate()
+
+	if len(first) != len(second) {
+		t.Fatalf("file counts differ: %d and %d", len(first), len(second))
+	}
+	for name, content := range first {
+		other, ok := second[name]
+		if !ok {
+			t.Errorf("%s was generated once and not the other time", name)
+			continue
+		}
+		if content != other {
+			t.Errorf("%s differs between two runs of the same spec", name)
+		}
+	}
 }
