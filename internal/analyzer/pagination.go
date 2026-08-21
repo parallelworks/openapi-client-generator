@@ -130,11 +130,25 @@ func (a *Analyzer) detectOffsetPagination(op *ir.OperationDef, pkg *ir.Package) 
 // than follow a cursor. The style decides how the parameter advances: an offset
 // by the items received, a page by one.
 func (a *Analyzer) buildOffsetPagination(op *ir.OperationDef, pkg *ir.Package, style ir.PaginationStyle, offsetParam, limitParam string) *ir.PaginationDef {
+	byName := ir.TypesByName(pkg.Types)
+
+	// A response that is the array is the page: there is no field to find, and
+	// nothing to choose between.
+	if elem, ok := responseArrayElem(byName, op); ok {
+		return &ir.PaginationDef{
+			Style:            style,
+			OffsetParam:      offsetParam,
+			LimitParam:       limitParam,
+			ItemsType:        elem,
+			ItemsAreResponse: true,
+		}
+	}
+
 	respType := a.findSuccessResponseType(op, pkg)
 	if respType == nil {
 		return nil
 	}
-	items := findItemsField(ir.TypesByName(pkg.Types), respType)
+	items := findItemsField(byName, respType)
 	if items.name == "" {
 		return nil
 	}
@@ -193,6 +207,26 @@ func findItemsField(byName map[string]*ir.TypeDef, td *ir.TypeDef) itemsFieldInf
 		return itemsFieldInfo{name: records[0].JSONName, elemType: records[0].Type[2:]}
 	}
 	return itemsFieldInfo{}
+}
+
+// responseArrayElem returns the element type of a success response that is
+// itself an array, following the aliases a spec may name one under.
+func responseArrayElem(byName map[string]*ir.TypeDef, op *ir.OperationDef) (string, bool) {
+	if op.SuccessResponse == nil {
+		return "", false
+	}
+	goType := op.SuccessResponse.TypeName
+	for range len(byName) + 1 {
+		if elem, ok := strings.CutPrefix(goType, "[]"); ok {
+			return elem, elem != ""
+		}
+		td := byName[ir.NamedType(goType)]
+		if td == nil || td.Kind != ir.TypeKindAlias {
+			return "", false
+		}
+		goType = td.GoType
+	}
+	return "", false
 }
 
 // recordArrays returns the array fields whose element type is a type the spec

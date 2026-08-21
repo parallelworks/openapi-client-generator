@@ -443,3 +443,87 @@ func TestPagination_SkipIsAnOffset(t *testing.T) {
 		t.Errorf("ListAlone pagination = %+v, want none", alone)
 	}
 }
+
+const bareArrayPageSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths:
+  /alerts:
+    get:
+      operationId: listAlerts
+      parameters:
+        - { name: skip, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Alert" } }
+  /named:
+    get:
+      operationId: listNamed
+      parameters:
+        - { name: offset, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/AlertList" } }
+  /scalar:
+    get:
+      operationId: listScalar
+      parameters:
+        - { name: offset, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { type: string } }
+components:
+  schemas:
+    AlertList:
+      type: array
+      items: { $ref: "#/components/schemas/Alert" }
+    Alert:
+      type: object
+      properties: { id: { type: string } }
+`
+
+// A response that is the array is the page. There is no field to name and
+// nothing to choose between, which is why this needs no rule about which array
+// counts.
+func TestPagination_BareArrayResponseIsThePage(t *testing.T) {
+	pkg, _ := analyzeSpec(t, bareArrayPageSpec)
+
+	byName := map[string]*ir.PaginationDef{}
+	for _, op := range pkg.Operations {
+		byName[op.Name] = op.Pagination
+	}
+
+	alerts := byName["ListAlerts"]
+	if alerts == nil {
+		t.Fatal("ListAlerts has no pagination")
+	}
+	if !alerts.ItemsAreResponse {
+		t.Error("ListAlerts should page over the response itself")
+	}
+	if alerts.ItemsField != "" {
+		t.Errorf("ListAlerts items field = %q, want none", alerts.ItemsField)
+	}
+	if alerts.ItemsType != "Alert" {
+		t.Errorf("ListAlerts items type = %q, want Alert", alerts.ItemsType)
+	}
+
+	// A spec may name the array, which is the same page behind an alias.
+	named := byName["ListNamed"]
+	if named == nil || !named.ItemsAreResponse || named.ItemsType != "Alert" {
+		t.Errorf("ListNamed pagination = %+v, want the aliased array's element", named)
+	}
+
+	// A response that is neither a page object nor an array is not a page.
+	if scalar := byName["ListScalar"]; scalar != nil {
+		t.Errorf("ListScalar pagination = %+v, want none", scalar)
+	}
+}
