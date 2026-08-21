@@ -187,6 +187,18 @@ components:
             kind: { const: gadget }
             gears: { type: integer }
           required: [kind, gears]
+    # Two entries that redeclare properties: one field each, or encoding/json
+    # ignores both of them.
+    Refined:
+      allOf:
+        - type: object
+          properties:
+            name: { type: string }
+            size: { type: integer }
+        - type: object
+          properties:
+            name: { type: string }
+          required: [name]
     Alert:
       type: object
       properties:
@@ -199,6 +211,7 @@ components:
           type: object
           patternProperties:
             "^x-": { type: string }
+        refined: { $ref: "#/components/schemas/Refined" }
       required: [id]
     Problem:
       type: object

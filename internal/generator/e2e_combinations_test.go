@@ -79,6 +79,7 @@ func TestE2E_Combinations(t *testing.T) {
 		{"operations.go", "params.Either", "a union-typed parameter"},
 		{"errors.go", "func (e *ProblemResponse) Error() string", "a typed error wrapper"},
 		{"errors.go", "e.Detail.Detail", "a message field found by its conventional name"},
+		{"types.go", "Name string `json:\"name\"`", "a property two allOf entries declare, required by one"},
 	} {
 		if !containsCollapsed(byName[want.file], want.decl) {
 			t.Errorf("%s is missing %s (%s)", want.file, want.why, want.decl)

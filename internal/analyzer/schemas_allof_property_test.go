@@ -191,3 +191,83 @@ func TestAllOfProperty_MultipartBodyKeepsItsFileParts(t *testing.T) {
 		t.Errorf("fields = %+v, want the embedded Meta beside the file", body.Fields)
 	}
 }
+
+const allOfRedeclaredSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths: {}
+components:
+  schemas:
+    Forkee:
+      allOf:
+        - type: object
+          properties:
+            name: { type: string }
+            archived: { type: boolean }
+            size: { type: integer }
+        - type: object
+          properties:
+            name: { type: string }
+            archived: { type: boolean }
+          required: [name]
+    Composed:
+      allOf:
+        - $ref: "#/components/schemas/Base"
+        - type: object
+          properties:
+            id: { type: string }
+    Base:
+      type: object
+      properties:
+        id: { type: string }
+`
+
+// allOf entries compose one value, so a property more than one declares is one
+// field. Two fields carrying one JSON tag is not just untidy: encoding/json
+// resolves that by ignoring both, so the property stops round-tripping.
+func TestAllOf_RedeclaredPropertyIsOneField(t *testing.T) {
+	_, typeMap := analyzeSpec(t, allOfRedeclaredSpec)
+
+	forkee := typeMap["Forkee"]
+	if forkee == nil {
+		t.Fatal("Forkee not found")
+	}
+
+	seen := map[string]int{}
+	for _, f := range forkee.Fields {
+		seen[f.JSONName]++
+	}
+	for _, prop := range []string{"name", "archived"} {
+		if seen[prop] != 1 {
+			t.Errorf("%s appears %d times, want once", prop, seen[prop])
+		}
+	}
+	if len(forkee.Fields) != 3 {
+		t.Errorf("fields = %+v, want name, archived, and size", forkee.Fields)
+	}
+
+	// A property one entry requires is required by the struct, whichever entry
+	// declared it first.
+	for _, f := range forkee.Fields {
+		if f.JSONName == "name" && !f.Required {
+			t.Errorf("name = %+v, want required: the second entry requires it", f)
+		}
+	}
+}
+
+// A property beside an embedded type is a different case: they live at
+// different depths, so Go shadows one with the other and the JSON tags do not
+// collide.
+func TestAllOf_PropertyBesideAnEmbedIsKept(t *testing.T) {
+	_, typeMap := analyzeSpec(t, allOfRedeclaredSpec)
+
+	composed := typeMap["Composed"]
+	if composed == nil {
+		t.Fatal("Composed not found")
+	}
+	if len(composed.Fields) != 2 {
+		t.Fatalf("fields = %+v, want the embed and the property", composed.Fields)
+	}
+	if !composed.Fields[0].Embedded || composed.Fields[1].JSONName != "id" {
+		t.Errorf("fields = %+v, want Base embedded beside id", composed.Fields)
+	}
+}
