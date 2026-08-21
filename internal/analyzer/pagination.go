@@ -40,7 +40,9 @@ func (a *Analyzer) detectCursorPagination(op *ir.OperationDef, pkg *ir.Package) 
 	// it sets each page, so a required (value) cursor can't be paginated.
 	cursorParam := ""
 	for _, p := range op.QueryParams {
-		if !p.Required && containsCI(cursorParamNames, p.OrigName) {
+		// The iterator hands the cursor back as the string it received, so a
+		// parameter of another type is not one it can drive.
+		if !p.Required && p.Type == "string" && containsCI(cursorParamNames, p.OrigName) {
 			cursorParam = p.OrigName
 			break
 		}
@@ -82,9 +84,14 @@ func (a *Analyzer) detectCursorPagination(op *ir.OperationDef, pkg *ir.Package) 
 
 // detectOffsetPagination checks if an operation uses offset-based pagination.
 func (a *Analyzer) detectOffsetPagination(op *ir.OperationDef, pkg *ir.Package) *ir.PaginationDef {
+	// Only parameters the iterator can actually count with: it reads the value
+	// as a number and writes the next one back, so a page that carries a token
+	// rather than a count is not a page this can walk.
 	queryNames := make(map[string]string) // lowercase -> origName
 	for _, p := range op.QueryParams {
-		queryNames[strings.ToLower(p.OrigName)] = p.OrigName
+		if isCountingType(p.Type) {
+			queryNames[strings.ToLower(p.OrigName)] = p.OrigName
+		}
 	}
 
 	offsetParam := ""
@@ -239,6 +246,18 @@ func recordArrays(byName map[string]*ir.TypeDef, arrays []*ir.Field) []*ir.Field
 		}
 	}
 	return records
+}
+
+// isCountingType reports whether a parameter holds a number an iterator can
+// advance. The generated code converts through int64, so every integer width
+// qualifies and nothing else does.
+func isCountingType(goType string) bool {
+	switch strings.TrimPrefix(goType, "*") {
+	case "int", "int8", "int16", "int32", "int64",
+		"uint", "uint8", "uint16", "uint32", "uint64":
+		return true
+	}
+	return false
 }
 
 // containsCI checks if any element in the list matches the target (case-insensitive).

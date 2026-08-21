@@ -527,3 +527,77 @@ func TestPagination_BareArrayResponseIsThePage(t *testing.T) {
 		t.Errorf("ListScalar pagination = %+v, want none", scalar)
 	}
 }
+
+const nonNumericPagingSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths:
+  /search:
+    get:
+      operationId: search
+      parameters:
+        - { name: page, in: query, schema: { type: string, maxLength: 5000 } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Page" } }
+  /counted:
+    get:
+      operationId: counted
+      parameters:
+        - { name: page, in: query, schema: { type: integer, format: int32 } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Page" } }
+  /tokened:
+    get:
+      operationId: tokened
+      parameters:
+        - { name: cursor, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Page" } }
+components:
+  schemas:
+    Page:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Item" } }
+        nextCursor: { type: string }
+    Item:
+      type: object
+      properties: { id: { type: string } }
+`
+
+// The generated iterator reads its position as a number and writes the next one
+// back, so a page carrying a token rather than a count is not one it can walk.
+// Stripe's search endpoints declare page as a string, and generating for them
+// produced code that did not compile.
+func TestPagination_ParameterTypesMustMatchTheWalk(t *testing.T) {
+	pkg, _ := analyzeSpec(t, nonNumericPagingSpec)
+
+	byName := map[string]*ir.PaginationDef{}
+	for _, op := range pkg.Operations {
+		byName[op.Name] = op.Pagination
+	}
+
+	if search := byName["Search"]; search != nil {
+		t.Errorf("Search pagination = %+v, want none: its page is a string", search)
+	}
+	counted := byName["Counted"]
+	if counted == nil || counted.Style != ir.PaginationStylePage {
+		t.Errorf("Counted pagination = %+v, want the page style", counted)
+	}
+	// A cursor is handed back as the string it arrived as, so an integer one is
+	// not a cursor this can drive either.
+	if tokened := byName["Tokened"]; tokened != nil && tokened.Style == ir.PaginationStyleCursor {
+		t.Errorf("Tokened pagination = %+v, want no cursor style: its cursor is an integer", tokened)
+	}
+}
