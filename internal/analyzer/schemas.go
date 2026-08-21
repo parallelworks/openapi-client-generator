@@ -741,8 +741,14 @@ func (a *Analyzer) synthesizeInlineObject(schema *highbase.Schema, nameHint stri
 
 	// A titled schema names itself, which keeps the generated name stable when
 	// the property that reaches it first is renamed.
-	if schema.Title != "" {
+	switch {
+	case schema.Title != "":
 		nameHint = schema.Title
+	case externalRefName(schema) != "":
+		// A schema in another file is shared by everything that references it,
+		// so it is named for itself rather than for whichever property in this
+		// document happened to reach it first.
+		nameHint = externalRefName(schema)
 	}
 	if nameHint == "" {
 		return "", false
@@ -1014,6 +1020,22 @@ func refToSchemaName(ref string) string {
 	const prefix = "#/components/schemas/"
 	if len(ref) > len(prefix) && ref[:len(prefix)] == prefix {
 		return ref[len(prefix):]
+	}
+	return ""
+}
+
+// externalRefName returns the name a reference into another document ends with,
+// or "" for a local reference or none at all.
+func externalRefName(schema *highbase.Schema) string {
+	if schema.ParentProxy == nil {
+		return ""
+	}
+	ref := schema.ParentProxy.GetReference()
+	if ref == "" || strings.HasPrefix(ref, "#/") {
+		return ""
+	}
+	if i := strings.LastIndex(ref, "/"); i >= 0 {
+		return ref[i+1:]
 	}
 	return ""
 }
