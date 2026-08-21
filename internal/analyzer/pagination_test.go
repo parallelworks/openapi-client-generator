@@ -359,3 +359,87 @@ func TestPagination_CamelCasePageSize(t *testing.T) {
 		t.Errorf("ListOthers limit param = %q, want pageSize", byName["ListOthers"])
 	}
 }
+
+const skipOffsetSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths:
+  /runs:
+    get:
+      operationId: listRuns
+      parameters:
+        - { name: skip, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/RunList" } }
+  /both:
+    get:
+      operationId: listBoth
+      parameters:
+        - { name: offset, in: query, schema: { type: integer } }
+        - { name: skip, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/RunList" } }
+  /alone:
+    get:
+      operationId: listAlone
+      parameters:
+        - { name: skip, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/RunList" } }
+components:
+  schemas:
+    RunList:
+      type: object
+      properties:
+        runs: { type: array, items: { $ref: "#/components/schemas/Run" } }
+        total: { type: integer }
+    Run:
+      type: object
+      properties: { id: { type: string } }
+`
+
+// skip is the other spelling of an offset, and the convention 15 endpoints of
+// one real spec use. It advances by items received, exactly as offset does.
+func TestPagination_SkipIsAnOffset(t *testing.T) {
+	pkg, _ := analyzeSpec(t, skipOffsetSpec)
+
+	byName := map[string]*ir.PaginationDef{}
+	for _, op := range pkg.Operations {
+		byName[op.Name] = op.Pagination
+	}
+
+	runs := byName["ListRuns"]
+	if runs == nil {
+		t.Fatal("ListRuns has no pagination")
+	}
+	if runs.Style != ir.PaginationStyleOffset {
+		t.Errorf("ListRuns style = %v, want PaginationStyleOffset", runs.Style)
+	}
+	if runs.OffsetParam != "skip" || runs.LimitParam != "limit" {
+		t.Errorf("ListRuns advances %q by %q, want skip and limit", runs.OffsetParam, runs.LimitParam)
+	}
+	if runs.ItemsField != "runs" {
+		t.Errorf("ListRuns items = %q, want runs", runs.ItemsField)
+	}
+
+	// A spec offering both names is answered with offset, the one the standard
+	// spells out.
+	if both := byName["ListBoth"]; both == nil || both.OffsetParam != "offset" {
+		t.Errorf("ListBoth advances %+v, want offset", both)
+	}
+
+	// An advancing parameter with nothing to size a page is not pagination.
+	if alone := byName["ListAlone"]; alone != nil {
+		t.Errorf("ListAlone pagination = %+v, want none", alone)
+	}
+}
