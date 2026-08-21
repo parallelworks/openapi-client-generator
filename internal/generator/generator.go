@@ -53,6 +53,7 @@ func (g *Generator) Generate() ([]GeneratedFile, error) {
 		{"errors.go.tmpl", "errors.go"},
 		{"responses.go.tmpl", "responses.go"},
 		{"webhooks.go.tmpl", "webhooks.go"},
+		{"streaming.go.tmpl", "streaming.go"},
 	}
 
 	var files []GeneratedFile

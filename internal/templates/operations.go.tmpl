@@ -8,23 +8,10 @@ import (
 	"net/http"
 	"net/url"
 )
-{{ range .Operations }}
+{{ define "requestSetup" }}
 {{- $hasParams := or .QueryParams .HeaderParams .CookieParams }}
 {{- $hasReqParam := or (hasRequiredQueryParams .) (hasRequiredHeaderParams .) (hasRequiredCookieParams .) }}
 {{- $needHeaders := or .HeaderParams .CookieParams }}
-{{ if $hasParams }}// {{ .Name }}Params contains the parameters for the {{ .Name }} operation.
-// Required parameters are value fields; optional parameters are pointers.
-type {{ .Name }}Params struct {
-{{ range .QueryParams }}{{ $pDoc := paramDocComment . }}{{ if $pDoc }}{{ indent $pDoc }}
-{{ end }}	{{ .FieldName }} {{ paramType . }} `json:"{{ .OrigName }}{{ if not .Required }},omitempty{{ end }}"`
-{{ end }}{{ range .HeaderParams }}{{ $pDoc := paramDocComment . }}{{ if $pDoc }}{{ indent $pDoc }}
-{{ end }}	{{ .FieldName }} {{ paramType . }} `json:"{{ .OrigName }}{{ if not .Required }},omitempty{{ end }}"`
-{{ end }}{{ range .CookieParams }}{{ $pDoc := paramDocComment . }}{{ if $pDoc }}{{ indent $pDoc }}
-{{ end }}	{{ .FieldName }} {{ paramType . }} `json:"{{ .OrigName }}{{ if not .Required }},omitempty{{ end }}"`
-{{ end }}}
-{{ end }}
-{{ $opDoc := opDocComment . }}{{ if $opDoc }}{{ $opDoc }}
-{{ end }}func (c *Client) {{ .Name }}(ctx context.Context{{ range .PathParams }}, {{ .Name }} {{ .Type }}{{ end }}{{ if hasBody . }}, body {{ if .RequestBody }}{{ if not .RequestBody.Required }}*{{ end }}{{ .RequestBody.TypeName }}{{ else }}any{{ end }}{{ end }}{{ if $hasReqParam }}, params {{ .Name }}Params{{ else if $hasParams }}, opts ...{{ .Name }}Params{{ end }}) {{ if successType . }}(*{{ successType . }}, error){{ else }}error{{ end }} {
 	path := "{{ .Path }}"
 {{ range .PathParams }}	path = pathReplace(path, "{{ .OrigName }}", "{{ .Style }}", {{ .Explode }}, {{ .Name }})
 {{ end }}
@@ -48,6 +35,25 @@ type {{ .Name }}Params struct {
 {{ else }}	addCookieHeader(headers, "{{ .OrigName }}", params.{{ .FieldName }})
 {{ end }}
 {{ end }}{{ end }}
+{{ end }}
+{{ range .Operations }}
+{{- $hasParams := or .QueryParams .HeaderParams .CookieParams }}
+{{- $hasReqParam := or (hasRequiredQueryParams .) (hasRequiredHeaderParams .) (hasRequiredCookieParams .) }}
+{{- $needHeaders := or .HeaderParams .CookieParams }}
+{{ if $hasParams }}// {{ .Name }}Params contains the parameters for the {{ .Name }} operation.
+// Required parameters are value fields; optional parameters are pointers.
+type {{ .Name }}Params struct {
+{{ range .QueryParams }}{{ $pDoc := paramDocComment . }}{{ if $pDoc }}{{ indent $pDoc }}
+{{ end }}	{{ .FieldName }} {{ paramType . }} `json:"{{ .OrigName }}{{ if not .Required }},omitempty{{ end }}"`
+{{ end }}{{ range .HeaderParams }}{{ $pDoc := paramDocComment . }}{{ if $pDoc }}{{ indent $pDoc }}
+{{ end }}	{{ .FieldName }} {{ paramType . }} `json:"{{ .OrigName }}{{ if not .Required }},omitempty{{ end }}"`
+{{ end }}{{ range .CookieParams }}{{ $pDoc := paramDocComment . }}{{ if $pDoc }}{{ indent $pDoc }}
+{{ end }}	{{ .FieldName }} {{ paramType . }} `json:"{{ .OrigName }}{{ if not .Required }},omitempty{{ end }}"`
+{{ end }}}
+{{ end }}
+{{ $opDoc := opDocComment . }}{{ if $opDoc }}{{ $opDoc }}
+{{ end }}func (c *Client) {{ .Name }}(ctx context.Context{{ range .PathParams }}, {{ .Name }} {{ .Type }}{{ end }}{{ if hasBody . }}, body {{ if .RequestBody }}{{ if not .RequestBody.Required }}*{{ end }}{{ .RequestBody.TypeName }}{{ else }}any{{ end }}{{ end }}{{ if $hasReqParam }}, params {{ .Name }}Params{{ else if $hasParams }}, opts ...{{ .Name }}Params{{ end }}) {{ if successType . }}(*{{ successType . }}, error){{ else }}error{{ end }} {
+{{ template "requestSetup" . }}
 {{- $errType := errorType . -}}
 {{ if successType . }}	var result {{ successType . }}
 	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, {{ printf "%q" (requestContentType .) }}, &result, {{ printf "%q" (successContentType .) }}, {{ not .NoAuth }}{{ if $needHeaders }}, headers{{ end }}); err != nil {
@@ -59,4 +65,15 @@ type {{ .Name }}Params struct {
 	}
 	return nil
 {{ end }}}
-{{ end }}
+{{ if .EventType }}
+// {{ .Name }}Stream is {{ .Name }} with the response taken as it arrives, one
+// server-sent event at a time. Close the stream when finished with it.
+func (c *Client) {{ .Name }}Stream(ctx context.Context{{ range .PathParams }}, {{ .Name }} {{ .Type }}{{ end }}{{ if hasBody . }}, body {{ if .RequestBody }}{{ if not .RequestBody.Required }}*{{ end }}{{ .RequestBody.TypeName }}{{ else }}any{{ end }}{{ end }}{{ if $hasReqParam }}, params {{ .Name }}Params{{ else if $hasParams }}, opts ...{{ .Name }}Params{{ end }}) (*EventStream[{{ .EventType }}], error) {
+{{ template "requestSetup" . }}
+	resp, err := c.doStream(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, {{ printf "%q" (requestContentType .) }}, "text/event-stream", {{ not .NoAuth }}{{ if $needHeaders }}, headers{{ end }})
+	if err != nil {
+		return nil, {{ if $errType }}parse{{ $errType }}(err){{ else }}err{{ end }}
+	}
+	return newEventStream[{{ .EventType }}](resp), nil
+}
+{{ end }}{{ end }}

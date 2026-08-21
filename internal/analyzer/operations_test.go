@@ -849,3 +849,63 @@ func TestOperationNames_CollisionsAreNumbered(t *testing.T) {
 	}
 	_ = typeMap
 }
+
+const eventStreamSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths:
+  /chat:
+    post:
+      operationId: chat
+      responses:
+        "200":
+          description: whole or in parts
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Reply" } }
+            text/event-stream: { schema: { $ref: "#/components/schemas/Chunk" } }
+  /logs:
+    get:
+      operationId: tailLogs
+      responses:
+        "200":
+          description: events with no schema
+          content:
+            text/event-stream: {}
+  /plain:
+    get:
+      operationId: plain
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Reply" } }
+components:
+  schemas:
+    Reply: { type: object, properties: { text: { type: string } } }
+    Chunk: { type: object, properties: { delta: { type: string } } }
+`
+
+// A response offering text/event-stream carries its payload one event at a
+// time, which the buffered path cannot hand back.
+func TestEventStream_PayloadTypeIsTheEventSchema(t *testing.T) {
+	pkg, _ := analyzeSpec(t, eventStreamSpec)
+
+	byName := map[string]*ir.OperationDef{}
+	for _, op := range pkg.Operations {
+		byName[op.Name] = op
+	}
+
+	if chat := byName["Chat"]; chat == nil || chat.EventType != "Chunk" {
+		t.Errorf("Chat EventType = %+v, want Chunk", chat)
+	}
+	// The JSON alternative still drives the buffered method.
+	if chat := byName["Chat"]; chat == nil || chat.SuccessResponse.TypeName != "Reply" {
+		t.Errorf("Chat success type = %+v, want Reply", chat.SuccessResponse)
+	}
+	// Events with no schema are still events; their data arrives as text.
+	if logs := byName["TailLogs"]; logs == nil || logs.EventType != "string" {
+		t.Errorf("TailLogs EventType = %+v, want string", logs)
+	}
+	if plain := byName["Plain"]; plain == nil || plain.EventType != "" {
+		t.Errorf("Plain EventType = %+v, want none", plain)
+	}
+}

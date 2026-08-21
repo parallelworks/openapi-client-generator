@@ -46,6 +46,7 @@ func FuncMap() template.FuncMap {
 		"declaredNamesLiteral":    declaredNamesLiteral,
 		"discriminatorFieldName":  discriminatorFieldName,
 		"hasPaginatedOps":         hasPaginatedOps,
+		"hasEventStreams":         hasEventStreams,
 		"paginationItemType":      paginationItemType,
 		"paginationCursorField":   paginationCursorField,
 		"paginationOffsetParam":   paginationOffsetParam,
@@ -740,6 +741,11 @@ func headerDocComment(h *ir.ResponseHeaderDef) string {
 // for use in the discriminator struct in UnmarshalJSON.
 func discriminatorFieldName(propertyName string) string {
 	return naming.Exported(propertyName)
+}
+
+// hasEventStreams reports whether any operation's payload arrives as events.
+func hasEventStreams(ops []*ir.OperationDef) bool {
+	return slices.ContainsFunc(ops, func(op *ir.OperationDef) bool { return op.EventType != "" })
 }
 
 // hasPaginatedOps returns true if any operation has pagination configured.

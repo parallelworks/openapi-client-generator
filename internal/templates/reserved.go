@@ -27,6 +27,7 @@ var ReservedIdentifiers = []string{
 	"ErrServiceUnavailable",
 	"ErrTooManyRequests",
 	"ErrUnauthorized",
+	"EventStream",
 	"FormFile",
 	"Middleware",
 	"NewClient",
