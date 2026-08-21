@@ -26,6 +26,10 @@ type Analyzer struct {
 	// inlineMultipartBodies holds the naming hints of multipart bodies written
 	// inline, which have no schema name to record instead.
 	inlineMultipartBodies map[string]bool
+	// bodyScope names the body being converted while it is one an operation
+	// writes inline. Such a body has no name in the spec beyond the operation's,
+	// so what it synthesizes is kept out of the scope every other body draws on.
+	bodyScope string
 	// goNameBySchema maps every component schema to its Go type name, filled in
 	// before any conversion so a reference to a schema that has not been converted
 	// yet still resolves to the name it will end up with.
