@@ -11,6 +11,7 @@ Given any OpenAPI 3.1 (or 3.0) spec, it outputs a complete, idiomatic Go client 
 - **Webhooks and callbacks**: typed payloads and a dispatcher for the requests the API sends you
 - **Server URLs**: `DefaultBaseURL` from the spec, with a builder for templated servers
 - **Response headers**: status and headers captured through the context, with declared headers parsed per operation
+- **Streaming**: `text/event-stream` responses get a typed `EventStream[T]` read as the server writes it
 - **Authentication**: `AuthProvider` interface with built-in Bearer, API key, and Basic auth, skipped for operations the spec marks as needing none
 - **Error handling** — `APIError` with sentinel errors (`errors.Is`), typed error wrappers with parsed response bodies (`errors.As`), readable messages via `x-ms-primary-error-message`
 - **Pagination**: auto-detected cursor, offset, and page pagination with a generic `PageIterator[T]`
@@ -163,6 +164,37 @@ client := petstore.NewClient(petstore.ServerURL("eu-west-1", ""))
 
 A relative server URL (`/api/v3`) gets neither, since it resolves against
 wherever the spec is served and the generated package cannot know that host.
+### Streaming responses
+
+A response that offers `text/event-stream` gets a second method that reads the
+events as the server writes them, typed to the schema the stream declares:
+
+```go
+stream, err := client.ChatCompletionStream(ctx, request)
+if err != nil {
+    return err
+}
+defer stream.Close()
+
+for {
+    chunk, err := stream.Next()
+    if errors.Is(err, io.EOF) {
+        break
+    }
+    if err != nil {
+        return err
+    }
+    fmt.Print(chunk.Choices[0].Delta.Content)
+}
+```
+
+The buffered method stays as it is, so an endpoint offering both JSON and events
+has one method for each. `stream.EventName()` and `stream.EventID()` carry the
+`event` and `id` fields of the event just returned, for a stream that names them.
+A payload of `[DONE]`, which OpenAI-compatible APIs use to close a stream, ends
+iteration rather than failing to decode, and a stream whose schema is a string
+hands back each event's text rather than parsing it.
+
 ### Response headers
 
 A method returns the decoded body, so what a response says outside its body is

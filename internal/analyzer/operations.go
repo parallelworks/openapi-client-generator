@@ -570,6 +570,11 @@ func (a *Analyzer) convertResponses(responses *v3high.Responses, opDef *ir.Opera
 				if opDef.SuccessResponse == nil {
 					opDef.SuccessResponse = rd
 				}
+				// A response offering text/event-stream carries its payload one
+				// event at a time, which the buffered path cannot hand back.
+				if opDef.EventType == "" {
+					opDef.EventType = a.eventStreamType(resp, hint)
+				}
 			} else if isErrorCode(code) {
 				rd.IsError = true
 				rd.ErrorWrapper = a.errorWrapperName(rd.TypeName, hint)
@@ -649,6 +654,24 @@ func (a *Analyzer) convertSingleResponse(code string, resp *v3high.Response, nam
 // serialize a parameter value into.
 func isJSONContent(contentType string) bool {
 	return strings.Contains(contentType, "json")
+}
+
+// eventStreamType returns the Go type of one event's payload for a response that
+// offers text/event-stream, or "" for one that does not.
+func (a *Analyzer) eventStreamType(resp *v3high.Response, nameHint string) string {
+	if resp.Content == nil {
+		return ""
+	}
+	mediaType, ok := resp.Content.Get("text/event-stream")
+	if !ok || mediaType == nil {
+		return ""
+	}
+	goType := a.resolveMediaTypeSchema(mediaType, nameHint+"Event")
+	if goType == "" {
+		// Events with no schema are still events; their data arrives as text.
+		return "string"
+	}
+	return goType
 }
 
 // convertResponseHeaders lowers the headers a response declares. A header value

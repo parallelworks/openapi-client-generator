@@ -19,7 +19,10 @@ type OperationDef struct {
 	SecurityReqs    [][]SecurityReq // OR of (AND of scheme refs)
 	// NoAuth records that the operation declares an empty security requirement,
 	// which overrides the document's to say it takes no credential.
-	NoAuth     bool
+	NoAuth bool
+	// EventType is the Go type of one server-sent event's payload, set when a
+	// success response offers text/event-stream.
+	EventType  string
 	Deprecated bool
 	Pagination *PaginationDef // nil if not paginated
 }
