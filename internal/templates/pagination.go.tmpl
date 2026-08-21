@@ -128,7 +128,14 @@ func (c *Client) {{ $op.Name }}Iter(ctx context.Context{{ range $op.PathParams }
 			if err != nil {
 				return nil, "", err
 			}
+{{- if $op.Pagination.ItemsAreResponse }}
+			var items []{{ paginationItemType $op }}
+			if result != nil {
+				items = *result
+			}
+{{- else }}
 			items := result.{{ toGoName $op.Pagination.ItemsField }}
+{{- end }}
 			if len(items) == 0 {
 				return items, "", nil
 			}

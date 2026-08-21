@@ -24,6 +24,8 @@ type PaginationDef struct {
 	// Common:
 	HasMoreField string // Response field indicating more pages exist (optional)
 	TotalField   string // Response field with total count (optional)
-	ItemsField   string // Response field containing the items array
+	ItemsField   string // Response field containing the items array, empty when the response is the array
 	ItemsType    string // Go element type of the items array (e.g., "Pet")
+	// ItemsAreResponse marks a response that is the page rather than holding it.
+	ItemsAreResponse bool
 }
