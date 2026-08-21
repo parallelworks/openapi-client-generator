@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.10](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.9...v0.2.10) (2026-08-21)
+
+
+### Bug Fixes
+
+* **analyzer:** inline bodies of the same shape took a type name from another operation ([#126](https://github.com/parallelworks/openapi-client-generator/issues/126)) ([f1bae04](https://github.com/parallelworks/openapi-client-generator/commit/f1bae041c02e79206207bdfef3be984dd5bf9767))
+
 ## [0.2.9](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.8...v0.2.9) (2026-08-21)
 
 
