@@ -595,12 +595,34 @@ func (a *Analyzer) convertPrimitive(goName, primaryType string, schema *highbase
 // noteUnsupportedKeywords records the JSON Schema keywords the generator reads
 // and cannot express in a Go type, so the spec's author hears about it once
 // rather than discovering it in the output.
+// constGoType returns the Go type a const value implies, for a schema that
+// states none of its own.
+func constGoType(schema *highbase.Schema) (string, bool) {
+	if schema.Const == nil {
+		return "", false
+	}
+	switch schema.Const.Tag {
+	case "!!str":
+		return "string", true
+	case "!!int":
+		return "int64", true
+	case "!!float":
+		return "float64", true
+	case "!!bool":
+		return "bool", true
+	}
+	return "", false
+}
+
 func (a *Analyzer) noteUnsupportedKeywords(schema *highbase.Schema) {
 	if len(schema.PrefixItems) > 0 {
 		a.prefixItemsSeen = true
 	}
 	if schema.DependentSchemas != nil && schema.DependentSchemas.Len() > 0 {
 		a.dependentSchemasSeen = true
+	}
+	if schema.If != nil || schema.Then != nil || schema.Else != nil {
+		a.conditionalSchemasSeen = true
 	}
 	if schema.PatternProperties != nil && schema.PatternProperties.Len() > 1 {
 		a.manyPatternPropertiesSeen = true
@@ -646,6 +668,12 @@ func (a *Analyzer) resolveGoType(schema *highbase.Schema, nameHint string) strin
 
 	// Enum type referenced inline -- use the primary type.
 	primaryType := primaryType(schema)
+	if primaryType == "" {
+		// A const says what the value is, which says what type it has.
+		if goType, ok := constGoType(schema); ok {
+			return goType
+		}
+	}
 
 	switch primaryType {
 	case "object":
