@@ -722,8 +722,9 @@ func (a *Analyzer) resolveGoType(schema *highbase.Schema, nameHint string) strin
 // synthesizeInlineUnion creates a named union TypeDef for an inline
 // oneOf/anyOf schema so its $ref variants keep their generated types instead
 // of degrading to any. Identical unions (same variants and discriminator) are
-// synthesized once and reuse the first occurrence's name; the resulting types
-// are emitted after the component schemas. Returns false when the schema is
+// synthesized once and reuse the first occurrence's name, unless they sit in
+// bodies different operations write inline; the resulting types are emitted
+// after the component schemas. Returns false when the schema is
 // not a union, has no $ref variants worth naming, or no nameHint is available.
 func (a *Analyzer) synthesizeInlineUnion(schema *highbase.Schema, nameHint string) (string, bool) {
 	variants := schema.OneOf
@@ -773,6 +774,7 @@ func (a *Analyzer) synthesizeInlineUnion(schema *highbase.Schema, nameHint strin
 	if schema.Discriminator != nil {
 		key += "|" + schema.Discriminator.PropertyName
 	}
+	key = a.synthesisKey(key, schema.Title != "")
 	if existing, ok := a.synthesizedByKey[key]; ok {
 		return existing.Name, true
 	}
@@ -789,7 +791,8 @@ func (a *Analyzer) synthesizeInlineUnion(schema *highbase.Schema, nameHint strin
 
 // synthesizeInlineObject declares a named struct for an object written inline, so
 // the properties it lists stay typed instead of collapsing into any. Two
-// declarations of one shape share a type.
+// declarations of one shape share a type, unless they sit in bodies different
+// operations write inline.
 func (a *Analyzer) synthesizeInlineObject(schema *highbase.Schema, nameHint string) (string, bool) {
 	// Multipart is a property of where the schema is used, so it is looked up
 	// under the hint the request body passed, before a title renames it.
@@ -797,6 +800,7 @@ func (a *Analyzer) synthesizeInlineObject(schema *highbase.Schema, nameHint stri
 
 	// A titled schema names itself, which keeps the generated name stable when
 	// the property that reaches it first is renamed.
+	selfNamed := true
 	switch {
 	case schema.Title != "":
 		nameHint = schema.Title
@@ -805,12 +809,14 @@ func (a *Analyzer) synthesizeInlineObject(schema *highbase.Schema, nameHint stri
 		// so it is named for itself rather than for whichever property in this
 		// document happened to reach it first.
 		nameHint = externalRefName(schema)
+	default:
+		selfNamed = false
 	}
 	if nameHint == "" {
 		return "", false
 	}
 
-	key := a.inlineObjectKey(schema, nameHint)
+	key := a.synthesisKey(a.inlineObjectKey(schema, nameHint), selfNamed)
 	if existing, ok := a.synthesizedByKey[key]; ok {
 		return existing.Name, true
 	}
@@ -833,14 +839,15 @@ func (a *Analyzer) synthesizeInlineAllOf(schema *highbase.Schema, nameHint strin
 	// properties are file parts, not base64 text.
 	multipartBody := a.inlineMultipartBodies[nameHint]
 
-	if schema.Title != "" {
+	selfNamed := schema.Title != ""
+	if selfNamed {
 		nameHint = schema.Title
 	}
 	if nameHint == "" {
 		return "", false
 	}
 
-	key := a.inlineAllOfKey(schema, nameHint)
+	key := a.synthesisKey(a.inlineAllOfKey(schema, nameHint), selfNamed)
 	if existing, ok := a.synthesizedByKey[key]; ok {
 		return existing.Name, true
 	}
@@ -853,6 +860,18 @@ func (a *Analyzer) synthesizeInlineAllOf(schema *highbase.Schema, nameHint strin
 	a.synthesizedByKey[key] = td
 	a.synthesized = append(a.synthesized, td)
 	return goName, true
+}
+
+// synthesisKey identifies a synthesized type. A schema inside a body an
+// operation writes inline is keyed by that body as well as by its shape, so two
+// operations that happen to declare the same body get a type each, named for the
+// operation declaring it, rather than sharing one named for whichever was
+// converted first.
+func (a *Analyzer) synthesisKey(key string, selfNamed bool) string {
+	if a.bodyScope == "" || selfNamed {
+		return key
+	}
+	return "at:" + a.bodyScope + "|" + key
 }
 
 // inlineAllOfKey identifies a composition by what it composes, so the same one

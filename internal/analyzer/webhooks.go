@@ -100,7 +100,9 @@ func (a *Analyzer) inboundPayloadType(op *v3high.Operation, nameHint string) (st
 	if !strings.Contains(contentType, "json") || mediaType == nil {
 		return "", false
 	}
+	end := a.enterBodyScope(nameHint+"Payload", op.RequestBody.GoLow().IsReference())
 	goType := a.resolveMediaTypeSchema(mediaType, nameHint+"Payload")
+	end()
 	if goType == "" || goType == "any" {
 		return "", false
 	}

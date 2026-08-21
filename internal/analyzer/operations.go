@@ -483,12 +483,29 @@ func (a *Analyzer) convertRequestBody(rb *v3high.RequestBody, nameHint string) (
 		return nil, nil
 	}
 
+	end := a.enterBodyScope(nameHint, rb.GoLow().IsReference())
+	goType := a.resolveMediaTypeSchema(mediaType, nameHint)
+	end()
+
 	return &ir.RequestBodyDef{
 		Required:    rb.Required != nil && *rb.Required,
 		Description: rb.Description,
 		ContentType: contentType,
-		TypeName:    bodyGoType(contentType, a.resolveMediaTypeSchema(mediaType, nameHint), mediaTypeSchema(mediaType)),
+		TypeName:    bodyGoType(contentType, goType, mediaTypeSchema(mediaType)),
 	}, nil
+}
+
+// enterBodyScope scopes the conversion of a body an operation writes inline,
+// returning the func that ends that scope. A body the spec declares as a
+// component is named by the spec, so it is converted in the shared scope and the
+// operations referencing it land on one type.
+func (a *Analyzer) enterBodyScope(nameHint string, component bool) func() {
+	prev := a.bodyScope
+	a.bodyScope = nameHint
+	if component {
+		a.bodyScope = ""
+	}
+	return func() { a.bodyScope = prev }
 }
 
 // formEncodedContentType reports whether a body is sent as form data, whose
@@ -627,6 +644,7 @@ func (a *Analyzer) convertSingleResponse(code string, resp *v3high.Response, nam
 	}
 
 	if resp.Content != nil {
+		end := a.enterBodyScope(nameHint, resp.GoLow().IsReference())
 		for contentType, mediaType := range resp.Content.FromOldest() {
 			if strings.Contains(contentType, "json") {
 				rd.ContentType = contentType
@@ -645,6 +663,7 @@ func (a *Analyzer) convertSingleResponse(code string, resp *v3high.Response, nam
 				break
 			}
 		}
+		end()
 	}
 
 	return rd
@@ -666,7 +685,12 @@ func (a *Analyzer) eventStreamType(resp *v3high.Response, nameHint string) strin
 	if !ok || mediaType == nil {
 		return ""
 	}
+	// The event payload is scoped to the response, not to its own hint: the same
+	// schema is also resolved as the response body, and one schema declares one
+	// type.
+	end := a.enterBodyScope(nameHint, resp.GoLow().IsReference())
 	goType := a.resolveMediaTypeSchema(mediaType, nameHint+"Event")
+	end()
 	if goType == "" {
 		// Events with no schema are still events; their data arrives as text.
 		return "string"
