@@ -179,11 +179,25 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 		IsNullable:  nullable,
 	}
 
-	// Collect required fields from the parent schema.
+	// Collect required fields from the parent schema. Every entry's requirements
+	// apply to the same value, so they are read before any property is built and
+	// a property required by one entry is required by the struct.
 	requiredSet := make(map[string]bool, len(schema.Required))
 	for _, r := range schema.Required {
 		requiredSet[r] = true
 	}
+	for _, proxy := range schema.AllOf {
+		if entry, err := proxy.BuildSchema(); err == nil && entry != nil {
+			for _, r := range entry.Required {
+				requiredSet[r] = true
+			}
+		}
+	}
+
+	// Entries compose one value, so a property more than one of them declares is
+	// one field. Appending a field per declaration gives two with the same JSON
+	// tag, which encoding/json resolves by ignoring both.
+	declared := make(map[string]bool)
 
 	for _, proxy := range schema.AllOf {
 		ref := proxy.GetReference()
@@ -209,11 +223,6 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 			continue
 		}
 
-		// Merge required from the allOf entry.
-		for _, r := range entrySchema.Required {
-			requiredSet[r] = true
-		}
-
 		if entrySchema.Properties == nil {
 			continue
 		}
@@ -227,6 +236,10 @@ func (a *Analyzer) convertAllOf(goName string, schema *highbase.Schema, nullable
 				continue
 			}
 
+			if declared[propName] {
+				continue
+			}
+			declared[propName] = true
 			td.Fields = addField(td.Fields, a.convertProperty(goName, propName, propSchema, requiredSet[propName], multipartBody))
 		}
 	}
