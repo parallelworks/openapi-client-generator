@@ -629,6 +629,21 @@ func (a *Analyzer) resolveGoType(schema *highbase.Schema, nameHint string) strin
 		return name
 	}
 
+	// An allOf composes other schemas. A lone $ref inside one is how a 3.0 spec
+	// hangs a description or nullable on a reference, since keywords beside a
+	// $ref are ignored, and it means the type it references. Anything else
+	// composes a shape of its own and is named like any other inline schema.
+	if len(schema.AllOf) > 0 {
+		if len(schema.AllOf) == 1 {
+			if goType := a.goTypeForRef(schema.AllOf[0].GetReference()); goType != "" {
+				return goType
+			}
+		}
+		if name, ok := a.synthesizeInlineAllOf(schema, nameHint); ok {
+			return name
+		}
+	}
+
 	// Enum type referenced inline -- use the primary type.
 	primaryType := primaryType(schema)
 
@@ -767,6 +782,51 @@ func (a *Analyzer) synthesizeInlineObject(schema *highbase.Schema, nameHint stri
 	a.synthesizedByKey[key] = td
 	a.synthesized = append(a.synthesized, td)
 	return goName, true
+}
+
+// synthesizeInlineAllOf declares a named struct for a composition written inline,
+// so what it composes stays typed instead of collapsing into any.
+func (a *Analyzer) synthesizeInlineAllOf(schema *highbase.Schema, nameHint string) (string, bool) {
+	if schema.Title != "" {
+		nameHint = schema.Title
+	}
+	if nameHint == "" {
+		return "", false
+	}
+
+	key := a.inlineAllOfKey(schema, nameHint)
+	if existing, ok := a.synthesizedByKey[key]; ok {
+		return existing.Name, true
+	}
+
+	goName := a.namer.Unique(naming.Exported(nameHint))
+	td, err := a.convertAllOf(goName, schema, false, false)
+	if err != nil || td == nil {
+		return "", false
+	}
+	a.synthesizedByKey[key] = td
+	a.synthesized = append(a.synthesized, td)
+	return goName, true
+}
+
+// inlineAllOfKey identifies a composition by what it composes, so the same one
+// written twice lands on one type.
+func (a *Analyzer) inlineAllOfKey(schema *highbase.Schema, nameHint string) string {
+	var b strings.Builder
+	b.WriteString("allOf")
+	for i, proxy := range schema.AllOf {
+		if ref := proxy.GetReference(); ref != "" {
+			b.WriteString("|" + ref)
+			continue
+		}
+		entry, err := proxy.BuildSchema()
+		if err != nil || entry == nil {
+			b.WriteString("|?")
+			continue
+		}
+		b.WriteString("|" + a.inlineObjectKey(entry, nameHint+"Part"+strconv.Itoa(i)))
+	}
+	return b.String()
 }
 
 // inlineObjectKey identifies an inline object by the Go it would generate, so two
