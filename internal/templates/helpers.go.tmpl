@@ -427,6 +427,18 @@ func pathSep(explode bool, exploded string) string {
 	return ","
 }
 
+// hasRequestBody reports whether there is a body to send. An optional body
+// arrives as a nil pointer inside an interface, which is not itself nil, and
+// encoding it would send the JSON literal null where the caller meant to send
+// nothing at all.
+func hasRequestBody(body any) bool {
+	if body == nil {
+		return false
+	}
+	rv := reflect.ValueOf(body)
+	return rv.Kind() != reflect.Pointer || !rv.IsNil()
+}
+
 // isRawResult fills a result the operation types as bytes or text with the body
 // as it arrived, reporting whether it did. Such a body is the value itself, not
 // a document to parse.

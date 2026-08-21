@@ -67,7 +67,7 @@ func (c *Client) do(ctx context.Context, method string, path string, body any, c
 	fullURL := c.baseURL + path
 
 	var payload []byte
-	if body != nil {
+	if hasRequestBody(body) {
 		var err error
 		payload, contentType, err = encodeRequestBody(body, contentType)
 		if err != nil {
