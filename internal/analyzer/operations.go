@@ -235,6 +235,9 @@ func (a *Analyzer) convertOperation(httpMethod, path string, pathItem *v3high.Pa
 		Path:        path,
 		Tags:        op.Tags,
 		Deprecated:  op.Deprecated != nil && *op.Deprecated,
+		// An absent security field inherits the document's; an empty one
+		// overrides it to say this operation needs no credential.
+		NoAuth: op.Security != nil && len(op.Security) == 0,
 	}
 
 	// Merge path-level and operation-level parameters.

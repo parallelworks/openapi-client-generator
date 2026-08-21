@@ -149,3 +149,50 @@ func TestSecuritySchemes_UnsupportedDegradeToAWarning(t *testing.T) {
 		t.Errorf("warnings = %v, want one each for legacy, mtls, and weird", pkg.Warnings)
 	}
 }
+
+const operationSecuritySpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+security:
+  - bearer: []
+paths:
+  /inherits:
+    get:
+      operationId: inherits
+      responses: { "204": { description: ok } }
+  /public:
+    get:
+      operationId: optsOut
+      security: []
+      responses: { "204": { description: ok } }
+  /picks:
+    get:
+      operationId: picks
+      security:
+        - bearer: []
+      responses: { "204": { description: ok } }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+`
+
+// An absent security field inherits the document's; an empty one overrides it to
+// say the operation takes no credential. The two are different declarations and
+// only the second one opts out.
+func TestOperationSecurity_EmptyRequirementOptsOut(t *testing.T) {
+	pkg, _ := analyzeSpec(t, operationSecuritySpec)
+
+	byName := make(map[string]*ir.OperationDef, len(pkg.Operations))
+	for _, op := range pkg.Operations {
+		byName[op.Name] = op
+	}
+
+	if op := byName["Inherits"]; op == nil || op.NoAuth {
+		t.Errorf("Inherits NoAuth = %v, want false: it declares nothing and inherits", op)
+	}
+	if op := byName["OptsOut"]; op == nil || !op.NoAuth {
+		t.Errorf("OptsOut NoAuth = %v, want true", op)
+	}
+	if op := byName["Picks"]; op == nil || op.NoAuth {
+		t.Errorf("Picks NoAuth = %v, want false: it names a scheme", op)
+	}
+}

@@ -50,11 +50,11 @@ type {{ .Name }}Params struct {
 {{ end }}{{ end }}
 {{- $errType := errorType . -}}
 {{ if successType . }}	var result {{ successType . }}
-	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, {{ printf "%q" (requestContentType .) }}, &result, {{ printf "%q" (successContentType .) }}{{ if $needHeaders }}, headers{{ end }}); err != nil {
+	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, {{ printf "%q" (requestContentType .) }}, &result, {{ printf "%q" (successContentType .) }}, {{ not .NoAuth }}{{ if $needHeaders }}, headers{{ end }}); err != nil {
 		return nil, {{ if $errType }}parse{{ $errType }}(err){{ else }}err{{ end }}
 	}
 	return &result, nil
-{{ else }}	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, {{ printf "%q" (requestContentType .) }}, nil, {{ printf "%q" (successContentType .) }}{{ if $needHeaders }}, headers{{ end }}); err != nil {
+{{ else }}	if err := c.do(ctx, "{{ .HTTPMethod }}", path, {{ if hasBody . }}body{{ else }}nil{{ end }}, {{ printf "%q" (requestContentType .) }}, nil, {{ printf "%q" (successContentType .) }}, {{ not .NoAuth }}{{ if $needHeaders }}, headers{{ end }}); err != nil {
 		return {{ if $errType }}parse{{ $errType }}(err){{ else }}err{{ end }}
 	}
 	return nil

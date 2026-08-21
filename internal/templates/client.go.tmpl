@@ -62,8 +62,10 @@ func NewClient(baseURL string, opts ...ClientOption) *Client {
 }
 
 // do executes an HTTP request and decodes the response. contentType selects the
-// request body encoding and is sent as the Content-Type header.
-func (c *Client) do(ctx context.Context, method string, path string, body any, contentType string, result any, accept string, headers ...http.Header) error {
+// request body encoding and is sent as the Content-Type header. An operation
+// whose spec declares an empty security requirement passes authenticated false,
+// since it says it takes no credential.
+func (c *Client) do(ctx context.Context, method string, path string, body any, contentType string, result any, accept string, authenticated bool, headers ...http.Header) error {
 	fullURL := c.baseURL + path
 
 	var payload []byte
@@ -130,7 +132,7 @@ func (c *Client) do(ctx context.Context, method string, path string, body any, c
 			}
 		}
 
-{{ if .AuthSchemes }}		if c.auth != nil {
+{{ if .AuthSchemes }}		if c.auth != nil && authenticated {
 			if err := c.auth.Apply(req); err != nil {
 				return fmt.Errorf("applying auth: %w", err)
 			}

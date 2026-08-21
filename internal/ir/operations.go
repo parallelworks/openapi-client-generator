@@ -17,8 +17,11 @@ type OperationDef struct {
 	SuccessResponse *ResponseDef    // The primary 2xx response
 	ErrorResponses  []*ResponseDef  // 4xx/5xx responses
 	SecurityReqs    [][]SecurityReq // OR of (AND of scheme refs)
-	Deprecated      bool
-	Pagination      *PaginationDef // nil if not paginated
+	// NoAuth records that the operation declares an empty security requirement,
+	// which overrides the document's to say it takes no credential.
+	NoAuth     bool
+	Deprecated bool
+	Pagination *PaginationDef // nil if not paginated
 }
 
 // ParamDef represents an operation parameter.

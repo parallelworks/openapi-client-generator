@@ -11,7 +11,7 @@ Given any OpenAPI 3.1 (or 3.0) spec, it outputs a complete, idiomatic Go client 
 - **Webhooks and callbacks**: typed payloads and a dispatcher for the requests the API sends you
 - **Server URLs**: `DefaultBaseURL` from the spec, with a builder for templated servers
 - **Response headers**: status and headers captured through the context, with declared headers parsed per operation
-- **Authentication** — `AuthProvider` interface with built-in Bearer, API key, and Basic auth
+- **Authentication**: `AuthProvider` interface with built-in Bearer, API key, and Basic auth, skipped for operations the spec marks as needing none
 - **Error handling** — `APIError` with sentinel errors (`errors.Is`), typed error wrappers with parsed response bodies (`errors.As`), readable messages via `x-ms-primary-error-message`
 - **Pagination**: auto-detected cursor, offset, and page pagination with a generic `PageIterator[T]`
 - **Retries**: configurable exponential backoff with jitter, honoring `Retry-After` in both forms and declining a wait past `MaxDelay`
