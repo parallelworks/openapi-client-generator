@@ -290,3 +290,72 @@ func TestPaginationItems_NoArrayGetsNoIterator(t *testing.T) {
 		t.Errorf("pagination = %+v, want none: the response holds no page", pd)
 	}
 }
+
+const camelPageSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: perPage, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Page" } }
+  /others:
+    get:
+      operationId: listOthers
+      parameters:
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: pageSize, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Page" } }
+components:
+  schemas:
+    Page:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Item" } }
+    Item:
+      type: object
+      properties: { id: { type: string } }
+`
+
+// Both spellings of a page size are recognized. perPage was not, so a spec
+// written in camelCase, which is what several generators emit, paginated
+// nowhere: the Mealie spec in #15 declares page and perPage on 30 endpoints.
+func TestPagination_CamelCasePageSize(t *testing.T) {
+	pkg, _ := analyzeSpec(t, camelPageSpec)
+
+	for _, op := range pkg.Operations {
+		if op.Pagination == nil {
+			t.Errorf("%s has no pagination, want the page style", op.Name)
+			continue
+		}
+		if op.Pagination.Style != ir.PaginationStylePage {
+			t.Errorf("%s style = %v, want PaginationStylePage", op.Name, op.Pagination.Style)
+		}
+		if op.Pagination.OffsetParam != "page" {
+			t.Errorf("%s advances %q, want page", op.Name, op.Pagination.OffsetParam)
+		}
+	}
+
+	byName := map[string]string{}
+	for _, op := range pkg.Operations {
+		if op.Pagination != nil {
+			byName[op.Name] = op.Pagination.LimitParam
+		}
+	}
+	if byName["ListItems"] != "perPage" {
+		t.Errorf("ListItems limit param = %q, want perPage", byName["ListItems"])
+	}
+	if byName["ListOthers"] != "pageSize" {
+		t.Errorf("ListOthers limit param = %q, want pageSize", byName["ListOthers"])
+	}
+}

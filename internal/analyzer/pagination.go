@@ -110,7 +110,9 @@ func (a *Analyzer) detectOffsetPagination(op *ir.OperationDef, pkg *ir.Package) 
 		return nil
 	}
 
-	for _, name := range []string{"per_page", "page_size", "pagesize", "limit"} {
+	// Both spellings of each name: the comparison is case-insensitive, so
+	// perpage covers perPage and pagesize covers pageSize.
+	for _, name := range []string{"per_page", "perpage", "page_size", "pagesize", "limit"} {
 		if orig, ok := queryNames[name]; ok {
 			return a.buildOffsetPagination(op, pkg, ir.PaginationStylePage, pageParam, orig)
 		}
