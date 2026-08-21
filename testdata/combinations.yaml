@@ -1,0 +1,209 @@
+# A 3.1 spec that crosses features rather than exercising them one at a time.
+# Every generated file has to hold together at once: iterators over unions,
+# composition under multipart, colliding names beside reserved ones.
+openapi: 3.1.0
+info:
+  title: Combinations
+  version: "1"
+servers:
+  - url: https://{region}.api.example.com/{basePath}
+    variables:
+      region: { default: us-east-1, enum: [us-east-1, eu-west-1] }
+      basePath: { default: v2 }
+security:
+  - bearer: []
+webhooks:
+  thing-created:
+    post:
+      description: Sent when a thing appears.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Thing" }
+  thing_created:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                at: { type: string, format: date-time }
+              required: [at]
+paths:
+  /things:
+    get:
+      operationId: listThings
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+        - name: filter
+          in: query
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Filter" }
+        - { name: ref, in: query, allowReserved: true, schema: { type: string } }
+        - name: either
+          in: query
+          schema:
+            anyOf: [{ type: string }, { type: integer }]
+      responses:
+        "200":
+          description: A page of things, each of which is a union.
+          headers:
+            x-trace: { schema: { type: string } }
+            X_Trace: { schema: { type: string } }
+            X-Rate-Limit-Remaining: { schema: { type: integer } }
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/ThingPage" } }
+        default:
+          description: error
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Problem" } }
+    post:
+      operationId: uploadThing
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Meta"
+                - type: object
+                  properties:
+                    file: { type: string, format: binary }
+                  required: [file]
+      responses:
+        "204": { description: stored }
+      callbacks:
+        onStored:
+          "{$request.body#/callbackUrl}":
+            post:
+              requestBody:
+                content:
+                  application/json:
+                    schema: { $ref: "#/components/schemas/Thing" }
+  /alerts:
+    get:
+      operationId: listAlerts
+      security: []
+      parameters:
+        - { name: skip, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: The page is the response.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Alert" } }
+  /reports:
+    get:
+      operationId: listReports
+      parameters:
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: perPage, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results: { type: array, items: { $ref: "#/components/schemas/Alert" } }
+                  total: { type: integer }
+  /files/{path}:
+    get:
+      operationId: download
+      parameters:
+        - { name: path, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: bytes
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: Bearer }
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: https://issuer.example.com/.well-known/openid-configuration
+  schemas:
+    # A name the templates also declare, and two that normalize together.
+    Client:
+      type: object
+      properties:
+        user-id: { type: string }
+        user_id: { type: string }
+    DefaultBaseURL:
+      type: object
+      properties: { v: { type: string } }
+    Meta:
+      type: object
+      properties:
+        label: { type: string }
+      required: [label]
+    Filter:
+      type: object
+      properties:
+        field: { type: string }
+        values: { type: array, items: { type: string } }
+      required: [field]
+    ThingPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/Thing" } }
+        nextCursor: { type: string }
+    # A discriminated union whose variants pin their tag the 3.1 way and share
+    # a base by composing it.
+    Thing:
+      oneOf:
+        - $ref: "#/components/schemas/Widget"
+        - $ref: "#/components/schemas/Gadget"
+      discriminator:
+        propertyName: kind
+        mapping:
+          widget: "#/components/schemas/Widget"
+          gadget: "#/components/schemas/Gadget"
+    ThingBase:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+      required: [id, name]
+    Widget:
+      allOf:
+        - $ref: "#/components/schemas/ThingBase"
+        - type: object
+          properties:
+            kind: { const: widget }
+            spins: { type: boolean }
+          required: [kind, spins]
+    Gadget:
+      allOf:
+        - $ref: "#/components/schemas/ThingBase"
+        - type: object
+          properties:
+            kind: { const: gadget }
+            gears: { type: integer }
+          required: [kind, gears]
+    Alert:
+      type: object
+      properties:
+        id: { type: string }
+        parent:
+          anyOf:
+            - $ref: "#/components/schemas/Alert"
+            - type: "null"
+        extensions:
+          type: object
+          patternProperties:
+            "^x-": { type: string }
+      required: [id]
+    Problem:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        detail: { type: string }
+      additionalProperties: true
