@@ -31,7 +31,7 @@ components:
 `)
 
 	// Deliberately not the spec's directory: this is the CI case.
-	chdir(t, t.TempDir())
+	t.Chdir(t.TempDir())
 
 	result, err := Parse(filepath.Join(dir, "api.yaml"), Config{})
 	if err != nil {
@@ -81,7 +81,7 @@ components:
         shared: { $ref: "../common.yaml#/components/schemas/Shared" }
 `)
 
-	chdir(t, t.TempDir())
+	t.Chdir(t.TempDir())
 
 	if _, err := Parse(filepath.Join(specDir, "api.yaml"), Config{}); err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -93,16 +93,4 @@ func writeSpecFile(t *testing.T, dir, name, content string) {
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 		t.Fatalf("writing %s: %v", name, err)
 	}
-}
-
-func chdir(t *testing.T, dir string) {
-	t.Helper()
-	previous, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	t.Cleanup(func() { os.Chdir(previous) })
 }
