@@ -342,6 +342,7 @@ time rather than passing silently:
 |---|---|
 | `prefixItems` | The array stays a slice of one element type. A tuple has no Go shape a slice can hold. |
 | `dependentSchemas` | Not enforced. A property whose shape depends on another is a validation rule, not a type. |
+| `if` / `then` / `else` | Not enforced, for the same reason: a shape that depends on a value is not a type. |
 | `patternProperties` with several patterns | The map takes an `any` value type, since the patterns disagree about what a key holds. One pattern types the map. |
 | `links` | Read and not used. Following a link is a decision for the caller, not a generated method. |
 | `mutualTLS` security scheme | No auth provider. The certificate is configured on the `http.Client`. |
