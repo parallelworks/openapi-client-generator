@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.2.9](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.8...v0.2.9) (2026-08-21)
+
+
+### Features
+
+* **analyzer:** a const says what type a property has ([#118](https://github.com/parallelworks/openapi-client-generator/issues/118)) ([82d2af7](https://github.com/parallelworks/openapi-client-generator/commit/82d2af7e37fa93bb8386c10f0e1d89f428ccbee4))
+* **analyzer:** a union parameter names a type instead of resting at any ([#88](https://github.com/parallelworks/openapi-client-generator/issues/88)) ([15fdb23](https://github.com/parallelworks/openapi-client-generator/commit/15fdb238bdd9f99e560674ef64ad88b4e9fc6ecf))
+* **analyzer:** allOf is honored wherever it appears, not only on named schemas ([#117](https://github.com/parallelworks/openapi-client-generator/issues/117)) ([41e0737](https://github.com/parallelworks/openapi-client-generator/commit/41e073725beb9b6741d91ed4e2709e34611e0c70))
+* **analyzer:** an object written inline keeps the properties it declares ([#80](https://github.com/parallelworks/openapi-client-generator/issues/80)) ([01c0eb5](https://github.com/parallelworks/openapi-client-generator/commit/01c0eb5dfb11885c930b7238379fee6b4919dc84))
+* **analyzer:** patternProperties types its map, and what stays unsupported says so ([#84](https://github.com/parallelworks/openapi-client-generator/issues/84)) ([f57cff2](https://github.com/parallelworks/openapi-client-generator/commit/f57cff2a42eecf6526baa847b8dcd619f71f888a))
+* **generator:** a text/event-stream response is read as it arrives ([#124](https://github.com/parallelworks/openapi-client-generator/issues/124)) ([84c7655](https://github.com/parallelworks/openapi-client-generator/commit/84c765524bed257d4e20e580d681456336ed3613))
+* **generator:** an error body names its message, extension or not ([#89](https://github.com/parallelworks/openapi-client-generator/issues/89)) ([856692b](https://github.com/parallelworks/openapi-client-generator/commit/856692b8d1523615d53879e5620b515fffe27524))
+* **generator:** offset and page pagination get the iterator they were detected for ([#93](https://github.com/parallelworks/openapi-client-generator/issues/93)) ([310d0f0](https://github.com/parallelworks/openapi-client-generator/commit/310d0f094c2f61f3466f356d97108c5678000e0c))
+* **generator:** webhooks and callbacks get payload types and a dispatcher ([#86](https://github.com/parallelworks/openapi-client-generator/issues/86)) ([6254c7e](https://github.com/parallelworks/openapi-client-generator/commit/6254c7e4b6eb45d5b3afe40301b7bd234054f3c9))
+* **pagination:** an endpoint returning the array itself gets an iterator ([#113](https://github.com/parallelworks/openapi-client-generator/issues/113)) ([7b85a94](https://github.com/parallelworks/openapi-client-generator/commit/7b85a94dbd80555804e7852537ac94209a6241a4))
+
+
+### Bug Fixes
+
+* **analyzer:** a multipart body written inline sent its file as base64 text ([#91](https://github.com/parallelworks/openapi-client-generator/issues/91)) ([1c185c7](https://github.com/parallelworks/openapi-client-generator/commit/1c185c71b012b420a13e606ff93b7c5dd7a44722))
+* **analyzer:** a parameter serialized with content went out style-encoded ([#82](https://github.com/parallelworks/openapi-client-generator/issues/82)) ([9925271](https://github.com/parallelworks/openapi-client-generator/commit/9925271b571de9ca49c60959b91e1d0a3406b037))
+* **analyzer:** allOf entries that redeclare a property lost it on the wire ([#121](https://github.com/parallelworks/openapi-client-generator/issues/121)) ([1499cc8](https://github.com/parallelworks/openapi-client-generator/commit/1499cc82cfbce5658b3bc83f696ca56901c8c189))
+* **analyzer:** two properties that sanitize to one Go name broke the build ([#97](https://github.com/parallelworks/openapi-client-generator/issues/97)) ([58ef8ec](https://github.com/parallelworks/openapi-client-generator/commit/58ef8ecd0cb507dbccee06de6d3578729474bd42))
+* **generator:** a binary or text response body was run through json.Unmarshal ([#85](https://github.com/parallelworks/openapi-client-generator/issues/85)) ([01305e6](https://github.com/parallelworks/openapi-client-generator/commit/01305e6cd5103e8f02c75b2d9f39af6261ca4bdd))
+* **generator:** allowReserved escaped the characters it says to pass through ([#83](https://github.com/parallelworks/openapi-client-generator/issues/83)) ([3f39e28](https://github.com/parallelworks/openapi-client-generator/commit/3f39e284bbf6c0e0d66aff473f2d30b147f58b38))
+* **generator:** an operation declaring security: [] still got the credential ([#107](https://github.com/parallelworks/openapi-client-generator/issues/107)) ([afae0d8](https://github.com/parallelworks/openapi-client-generator/commit/afae0d8a7260f170aac14e5512fd8a6e0294d806))
+* **generator:** an optional body left out was sent as the JSON literal null ([#103](https://github.com/parallelworks/openapi-client-generator/issues/103)) ([da687a9](https://github.com/parallelworks/openapi-client-generator/commit/da687a9563b6f2ad848850d2d5f1edf966ae648f))
+* **generator:** operations, header fields, and webhooks redeclared derived names ([#99](https://github.com/parallelworks/openapi-client-generator/issues/99)) ([ce6bee3](https://github.com/parallelworks/openapi-client-generator/commit/ce6bee304637bf26e2a408f4541e4580b4b0ff65))
+* **generator:** Retry-After was read in one form and obeyed without limit ([#95](https://github.com/parallelworks/openapi-client-generator/issues/95)) ([f82367d](https://github.com/parallelworks/openapi-client-generator/commit/f82367dcf3c1cdb063b23f807341751243de6f3e))
+* **pagination:** a page or offset that is not a number broke the build ([#115](https://github.com/parallelworks/openapi-client-generator/issues/115)) ([1ca7c29](https://github.com/parallelworks/openapi-client-generator/commit/1ca7c29f1ecd0cb9595f5c3440673ec1d6274e08))
+* **pagination:** a page size named perPage was not recognized ([#109](https://github.com/parallelworks/openapi-client-generator/issues/109)) ([e43dd92](https://github.com/parallelworks/openapi-client-generator/commit/e43dd922ac429b4587c55546ea6495e606da0895))
+* **pagination:** skip was not recognized as an offset ([#111](https://github.com/parallelworks/openapi-client-generator/issues/111)) ([6042c3b](https://github.com/parallelworks/openapi-client-generator/commit/6042c3ba43aa60d8544d23e2898d9322be4f3890))
+* **parser:** a relative $ref resolved against the working directory ([#106](https://github.com/parallelworks/openapi-client-generator/issues/106)) ([518c879](https://github.com/parallelworks/openapi-client-generator/commit/518c879d8a8eaea20c32b0e319d881256985f0be))
+* **templates:** a schema named DefaultBaseURL redeclared the client's own ([#101](https://github.com/parallelworks/openapi-client-generator/issues/101)) ([3b45efa](https://github.com/parallelworks/openapi-client-generator/commit/3b45efa1895b55f3b829a9f55690a39dc62453f8))
+
 ## [0.2.8](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.7...v0.2.8) (2026-08-20)
 
 
