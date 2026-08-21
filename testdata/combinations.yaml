@@ -95,6 +95,15 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: "#/components/schemas/Alert" } }
+        "422":
+          description: An error body with no name of its own.
+          content:
+            application/json:
+              schema: { type: array, items: { type: string } }
+        default:
+          description: A second named error shape, so the package holds more than one.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Failure" } }
   /reports:
     get:
       operationId: listReports
@@ -213,6 +222,11 @@ components:
             "^x-": { type: string }
         refined: { $ref: "#/components/schemas/Refined" }
       required: [id]
+    Failure:
+      type: object
+      properties:
+        code: { type: integer }
+        message: { type: string }
     Problem:
       type: object
       properties:
