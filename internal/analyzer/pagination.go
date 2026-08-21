@@ -90,9 +90,14 @@ func (a *Analyzer) detectOffsetPagination(op *ir.OperationDef, pkg *ir.Package) 
 	offsetParam := ""
 	limitParam := ""
 
-	// Check for offset + limit pattern.
-	if orig, ok := queryNames["offset"]; ok {
-		offsetParam = orig
+	// Check for offset + limit pattern. skip is the other spelling of an offset:
+	// OData writes $skip, and APIs built on Mongo or on Go frameworks use it as
+	// often as offset.
+	for _, name := range []string{"offset", "skip"} {
+		if orig, ok := queryNames[name]; ok {
+			offsetParam = orig
+			break
+		}
 	}
 	if orig, ok := queryNames["limit"]; ok {
 		limitParam = orig
