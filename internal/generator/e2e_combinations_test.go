@@ -1,8 +1,6 @@
 package generator
 
 import (
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -91,7 +89,7 @@ func TestE2E_Combinations(t *testing.T) {
 		t.Error("operations.go: the operation declaring security: [] should not authenticate")
 	}
 
-	buildAndVet(t, files, "combinations")
+	buildGenerated(t, files, "combinations")
 }
 
 // containsCollapsed reports whether haystack holds needle once the runs of
@@ -100,26 +98,4 @@ func TestE2E_Combinations(t *testing.T) {
 // depend on alignment that has not happened yet.
 func containsCollapsed(haystack, needle string) bool {
 	return strings.Contains(strings.Join(strings.Fields(haystack), " "), strings.Join(strings.Fields(needle), " "))
-}
-
-// buildAndVet writes the generated files to a module and runs build and vet over
-// them. vet catches what compiles and is still wrong: a shadowed error, a
-// printf verb that does not match, a lost struct tag.
-func buildAndVet(t *testing.T, files []GeneratedFile, module string) {
-	t.Helper()
-	dir := t.TempDir()
-	goMod := []byte("module " + module + "\n\ngo 1.25.5\n")
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), goMod, 0o644); err != nil {
-		t.Fatalf("writing go.mod: %v", err)
-	}
-	if err := WriteFiles(dir, files); err != nil {
-		t.Fatalf("WriteFiles: %v", err)
-	}
-	for _, args := range [][]string{{"build", "./..."}, {"vet", "./..."}} {
-		cmd := exec.Command("go", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("go %s on the generated package: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
 }
