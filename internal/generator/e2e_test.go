@@ -2021,13 +2021,17 @@ func runGeneratedWireTest(t *testing.T, files []GeneratedFile, module, testFile 
 	if err := os.WriteFile(filepath.Join(tmpDir, "wire_test.go"), []byte(testFile), 0o644); err != nil {
 		t.Fatalf("writing wire_test.go: %v", err)
 	}
-	cmd := exec.Command("go", "test", "./...")
-	cmd.Dir = tmpDir
-	if output, err := cmd.CombinedOutput(); err != nil {
-		for _, f := range files {
-			t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
+	// go test builds and runs; vet on top of it reports what compiles and is
+	// still wrong.
+	for _, args := range [][]string{{"vet", "./..."}, {"test", "./..."}} {
+		cmd := exec.Command("go", args...)
+		cmd.Dir = tmpDir
+		if output, err := cmd.CombinedOutput(); err != nil {
+			for _, f := range files {
+				t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
+			}
+			t.Fatalf("go %s on the generated package: %v\n%s", strings.Join(args, " "), err, string(output))
 		}
-		t.Fatalf("generated wire test failed: %v\n%s", err, string(output))
 	}
 }
 
@@ -2075,12 +2079,17 @@ func buildGenerated(t *testing.T, files []GeneratedFile, module string) {
 	if err := WriteFiles(tmpDir, files); err != nil {
 		t.Fatalf("WriteFiles: %v", err)
 	}
-	cmd := exec.Command("go", "build", "./...")
-	cmd.Dir = tmpDir
-	if output, err := cmd.CombinedOutput(); err != nil {
-		for _, f := range files {
-			t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
+	// vet as well as build: a generated package can compile and still be wrong in
+	// ways vet names, and one of them, two fields sharing a JSON tag, silently
+	// stops a property from decoding.
+	for _, args := range [][]string{{"build", "./..."}, {"vet", "./..."}} {
+		cmd := exec.Command("go", args...)
+		cmd.Dir = tmpDir
+		if output, err := cmd.CombinedOutput(); err != nil {
+			for _, f := range files {
+				t.Logf("=== %s ===\n%s", f.Name, string(f.Content))
+			}
+			t.Fatalf("go %s on the generated package: %v\n%s", strings.Join(args, " "), err, string(output))
 		}
-		t.Fatalf("generated code failed to compile: %v\n%s", err, string(output))
 	}
 }
