@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/pb33f/libopenapi"
 	"github.com/pb33f/libopenapi/datamodel"
@@ -28,7 +29,15 @@ func Parse(specPath string, cfg Config) (*ParseResult, error) {
 		return nil, fmt.Errorf("reading spec file: %w", err)
 	}
 
+	// A $ref is relative to the document holding it, not to wherever the
+	// generator was run from, so file references start at the spec's directory.
+	basePath, err := filepath.Abs(filepath.Dir(specPath))
+	if err != nil {
+		return nil, fmt.Errorf("resolving the spec's directory: %w", err)
+	}
+
 	docConfig := &datamodel.DocumentConfiguration{
+		BasePath:              basePath,
 		AllowFileReferences:   true,
 		AllowRemoteReferences: cfg.AllowRemoteRefs,
 	}
