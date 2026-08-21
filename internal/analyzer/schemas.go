@@ -787,6 +787,11 @@ func (a *Analyzer) synthesizeInlineObject(schema *highbase.Schema, nameHint stri
 // synthesizeInlineAllOf declares a named struct for a composition written inline,
 // so what it composes stays typed instead of collapsing into any.
 func (a *Analyzer) synthesizeInlineAllOf(schema *highbase.Schema, nameHint string) (string, bool) {
+	// Multipart is a property of where the schema is used, and a body composed
+	// through allOf is used the same way one written as an object is: its binary
+	// properties are file parts, not base64 text.
+	multipartBody := a.inlineMultipartBodies[nameHint]
+
 	if schema.Title != "" {
 		nameHint = schema.Title
 	}
@@ -800,7 +805,7 @@ func (a *Analyzer) synthesizeInlineAllOf(schema *highbase.Schema, nameHint strin
 	}
 
 	goName := a.namer.Unique(naming.Exported(nameHint))
-	td, err := a.convertAllOf(goName, schema, false, false)
+	td, err := a.convertAllOf(goName, schema, false, multipartBody)
 	if err != nil || td == nil {
 		return "", false
 	}

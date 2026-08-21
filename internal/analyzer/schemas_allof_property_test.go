@@ -140,3 +140,54 @@ func TestRefIdioms_3_1(t *testing.T) {
 		t.Errorf("anyOf with a null member = %q, want *User", byJSON["nullableRef"])
 	}
 }
+
+const allOfMultipartSpec = `openapi: 3.1.0
+info: { title: t, version: "1" }
+paths:
+  /upload:
+    post:
+      operationId: upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Meta"
+                - type: object
+                  properties:
+                    file: { type: string, format: binary }
+                  required: [file]
+      responses:
+        "204": { description: ok }
+components:
+  schemas:
+    Meta:
+      type: object
+      properties:
+        label: { type: string }
+      required: [label]
+`
+
+// Multipart is a property of where a schema is used, and a body composed through
+// allOf is used the same way one written as an object is: its binary properties
+// are file parts rather than base64 text in an ordinary field.
+func TestAllOfProperty_MultipartBodyKeepsItsFileParts(t *testing.T) {
+	_, typeMap := analyzeSpec(t, allOfMultipartSpec)
+
+	body := typeMap["UploadBody"]
+	if body == nil {
+		t.Fatal("UploadBody not found")
+	}
+	byJSON := map[string]string{}
+	for _, f := range body.Fields {
+		byJSON[f.JSONName] = f.Type
+	}
+	if byJSON["file"] != "FormFile" {
+		t.Errorf("file = %q, want FormFile", byJSON["file"])
+	}
+	// What it composes comes along.
+	if len(body.Fields) != 2 || !body.Fields[0].Embedded || body.Fields[0].Type != "Meta" {
+		t.Errorf("fields = %+v, want the embedded Meta beside the file", body.Fields)
+	}
+}
