@@ -136,6 +136,29 @@ func TestResetStreamIsRetried(t *testing.T) {
 	}
 }
 
+// http.Client.Timeout reports as context.DeadlineExceeded since Go 1.23, but it
+// is a per-attempt limit, not the caller's deadline, so the next attempt is due.
+func TestClientTimeoutIsRetried(t *testing.T) {
+	var calls atomic.Int32
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		<-release
+	}))
+	t.Cleanup(func() { close(release); srv.Close() })
+	cfg := DefaultRetryConfig()
+	cfg.BaseDelay = 10 * time.Millisecond
+	cfg.MaxDelay = 10 * time.Millisecond
+	client := NewClient(srv.URL, WithRetry(cfg), WithHTTPClient(&http.Client{Timeout: 50 * time.Millisecond}))
+
+	if _, err := client.GetThing(t.Context()); err == nil {
+		t.Fatal("expected the timeout to surface")
+	}
+	if n := calls.Load(); n != int32(cfg.MaxRetries+1) {
+		t.Errorf("calls = %d, want every attempt", n)
+	}
+}
+
 type countingListener struct {
 	net.Listener
 	accepts atomic.Int32

@@ -140,9 +140,11 @@ func isIdempotentMethod(method string) bool {
 // isRetryableNetworkError reports whether a request that got no response is
 // worth sending again. The transport reports most dropped connections through
 // unexported types, so the failures known to be permanent are excluded rather
-// than the transient ones enumerated.
+// than the transient ones enumerated. An expired deadline is not excluded: a
+// per-attempt http.Client.Timeout reports as one, and the caller's own context
+// ends the retry loop before it waits.
 func isRetryableNetworkError(err error) bool {
-	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
 	var certErr *tls.CertificateVerificationError
