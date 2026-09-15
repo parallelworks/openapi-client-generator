@@ -4,13 +4,14 @@ package {{ .Name }}
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
-	"io"
 	"math"
 	"math/rand"
-	"net"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -136,20 +137,26 @@ func isIdempotentMethod(method string) bool {
 	}
 }
 
-// isRetryableNetworkError reports whether err is a transient transport failure worth retrying.
+// isRetryableNetworkError reports whether a request that got no response is
+// worth sending again. The transport reports most dropped connections through
+// unexported types, so the failures known to be permanent are excluded rather
+// than the transient ones enumerated.
 func isRetryableNetworkError(err error) bool {
-	if err == nil || errors.Is(err, context.Canceled) {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-		return true
+	var certErr *tls.CertificateVerificationError
+	if errors.As(err, &certErr) {
+		return false
 	}
-	// Don't use a bare net.Error check: *url.Error always satisfies it, so it would
-	// also retry non-transient failures (TLS, bad URL). Match a real timeout or socket error.
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
+	var recordErr tls.RecordHeaderError
+	if errors.As(err, &recordErr) {
+		return false
 	}
-	var opErr *net.OpError
-	return errors.As(err, &opErr)
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		msg := urlErr.Err.Error()
+		return !strings.Contains(msg, "unsupported protocol scheme") && !strings.HasPrefix(msg, "stopped after ")
+	}
+	return true
 }
