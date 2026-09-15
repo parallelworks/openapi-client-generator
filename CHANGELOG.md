@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.11](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.10...v0.2.11) (2026-09-15)
+
+
+### Bug Fixes
+
+* **generator:** a request dropped by the HTTP/2 transport is not retried unless its error has a recognized shape ([#129](https://github.com/parallelworks/openapi-client-generator/issues/129)) ([8f1e70a](https://github.com/parallelworks/openapi-client-generator/commit/8f1e70aecac39e8b8262ba8a962650b9baa5233c))
+
 ## [0.2.10](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.9...v0.2.10) (2026-08-21)
 
 
