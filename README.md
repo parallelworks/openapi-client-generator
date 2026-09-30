@@ -381,4 +381,4 @@ time rather than passing silently:
 
 ## License
 
-[MIT](LICENSE) — Copyright (c) 2026 Parallel Works
+[Apache-2.0](LICENSE) — Copyright (c) 2026 Parallel Works
