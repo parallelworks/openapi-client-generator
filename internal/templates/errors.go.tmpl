@@ -3,11 +3,12 @@
 package {{ .Name }}
 
 import (
-{{- if uniqueErrorTypes . }}
 	"encoding/json"
+{{- if uniqueErrorTypes . }}
 	"errors"
 {{- end }}
 	"fmt"
+	"mime"
 	"net/http"
 )
 
@@ -29,12 +30,21 @@ var (
 
 // APIError represents a non-2xx HTTP response.
 type APIError struct {
-	StatusCode int
-	Status     string
-	Body       []byte
+	StatusCode  int
+	Status      string
+	ContentType string
+	Body        []byte
 }
 
 func (e *APIError) Error() string {
+	if p := e.Problem(); p != nil {
+		if p.Detail != "" {
+			return fmt.Sprintf("API error %s: %s", e.statusLabel(), p.Detail)
+		}
+		if p.Title != "" {
+			return fmt.Sprintf("API error %s: %s", e.statusLabel(), p.Title)
+		}
+	}
 	if len(e.Body) > 0 {
 		return fmt.Sprintf("API error %s: %s", e.statusLabel(), e.Body)
 	}
@@ -52,6 +62,37 @@ func (e *APIError) statusLabel() string {
 		return fmt.Sprintf("%d %s", e.StatusCode, text)
 	}
 	return fmt.Sprintf("%d", e.StatusCode)
+}
+
+// ProblemDetails is an RFC 9457 problem details object.
+type ProblemDetails struct {
+	Type     string `json:"type,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Status   int    `json:"status,omitempty"`
+	Detail   string `json:"detail,omitempty"`
+	Instance string `json:"instance,omitempty"`
+	// Extensions holds every other member, such as an error code, by name.
+	Extensions map[string]json.RawMessage `json:"-"`
+}
+
+// Problem returns the body as RFC 9457 problem details when the response is
+// application/problem+json, and nil otherwise.
+func (e *APIError) Problem() *ProblemDetails {
+	if mediaType, _, _ := mime.ParseMediaType(e.ContentType); mediaType != "application/problem+json" {
+		return nil
+	}
+	var p ProblemDetails
+	var members map[string]json.RawMessage
+	if json.Unmarshal(e.Body, &p) != nil || json.Unmarshal(e.Body, &members) != nil {
+		return nil
+	}
+	for _, name := range []string{"type", "title", "status", "detail", "instance"} {
+		delete(members, name)
+	}
+	if len(members) > 0 {
+		p.Extensions = members
+	}
+	return &p
 }
 
 // Is supports errors.Is by matching on status code.
