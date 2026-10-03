@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.12](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.11...v0.2.12) (2026-10-03)
+
+
+### Features
+
+* **generator:** RFC 9457 problem details are read as such, so errors show their detail instead of a JSON body ([#133](https://github.com/parallelworks/openapi-client-generator/issues/133)) ([2df0527](https://github.com/parallelworks/openapi-client-generator/commit/2df0527d63c81b9d3d36d5b7d5c2b56de97aa5e6))
+
 ## [0.2.11](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.10...v0.2.11) (2026-09-15)
 
 
