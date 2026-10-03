@@ -1,16 +1,23 @@
+name: release-please
+
 on:
   push:
     branches:
       - canary
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
-name: release-please
+# Queue rather than cancel: an interrupted run can leave a release half created.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the tag and GitHub release
+      pull-requests: write # open and update the release PR
     steps:
-      - uses: googleapis/release-please-action@v5
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
