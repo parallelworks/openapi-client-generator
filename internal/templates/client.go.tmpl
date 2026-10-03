@@ -227,7 +227,7 @@ func (c *Client) send(ctx context.Context, method string, path string, body any,
 			if readErr != nil {
 				return nil, fmt.Errorf("reading response body: %w", readErr)
 			}
-			return nil, &APIError{StatusCode: resp.StatusCode, Status: resp.Status, Body: respBody}
+			return nil, &APIError{StatusCode: resp.StatusCode, Status: resp.Status, ContentType: resp.Header.Get("Content-Type"), Body: respBody}
 		}
 
 		return resp, nil

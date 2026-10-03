@@ -13,7 +13,7 @@ Given any OpenAPI 3.1 (or 3.0) spec, it outputs a complete, idiomatic Go client 
 - **Response headers**: status and headers captured through the context, with declared headers parsed per operation
 - **Streaming**: `text/event-stream` responses get a typed `EventStream[T]` read as the server writes it
 - **Authentication**: `AuthProvider` interface with built-in Bearer, API key, and Basic auth, skipped for operations the spec marks as needing none
-- **Error handling** — `APIError` with sentinel errors (`errors.Is`), typed error wrappers with parsed response bodies (`errors.As`), readable messages via `x-ms-primary-error-message`
+- **Error handling** — `APIError` with sentinel errors (`errors.Is`), typed error wrappers with parsed response bodies (`errors.As`), readable messages via `x-ms-primary-error-message`, RFC 9457 problem details via `Problem()`
 - **Pagination**: auto-detected cursor, offset, and page pagination with a generic `PageIterator[T]`
 - **Retries**: configurable exponential backoff with jitter, honoring `Retry-After` in both forms and declining a wait past `MaxDelay`
 - **Middleware** — composable request/response middleware chain
@@ -288,6 +288,27 @@ A body carrying several is tried in that order at runtime, so an RFC 7807
 response renders `detail` when it has one and `title` when it does not. A body
 with no such property, or with one holding something other than text, keeps the
 raw output.
+
+### Problem details
+
+A response sent as `application/problem+json` is read as RFC 9457 problem
+details, whatever the operation's error schema says. `APIError.Problem()`
+returns its `Type`, `Title`, `Status`, `Detail` and `Instance`, with every other
+member, such as an error code, in `Extensions` as raw JSON. `Error()` renders its
+`detail`, or its `title` when it has none, so a typed wrapper whose schema doesn't
+fit the problem still shows the message rather than the body:
+
+```go
+var apiErr *client.APIError
+if errors.As(err, &apiErr) {
+	if p := apiErr.Problem(); p != nil {
+		var code string
+		_ = json.Unmarshal(p.Extensions["code"], &code)
+	}
+}
+```
+
+Any other media type is not parsed, and `ContentType` holds what the server sent.
 
 ### Webhooks and callbacks
 
