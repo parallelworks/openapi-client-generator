@@ -2,7 +2,9 @@ package generator
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"sync"
 	"text/template"
 
 	"github.com/parallelworks/openapi-client-generator/internal/ir"
@@ -56,13 +58,22 @@ func (g *Generator) Generate() ([]GeneratedFile, error) {
 		{"streaming.go.tmpl", "streaming.go"},
 	}
 
-	var files []GeneratedFile
-	for _, spec := range specs {
-		var buf bytes.Buffer
-		if err := g.templates.ExecuteTemplate(&buf, spec.tmplName, g.pkg); err != nil {
-			return nil, fmt.Errorf("executing template %s: %w", spec.tmplName, err)
-		}
-		files = append(files, GeneratedFile{Name: spec.fileName, Content: buf.Bytes()})
+	files := make([]GeneratedFile, len(specs))
+	errs := make([]error, len(specs))
+	var wg sync.WaitGroup
+	for i, spec := range specs {
+		wg.Go(func() {
+			var buf bytes.Buffer
+			if err := g.templates.ExecuteTemplate(&buf, spec.tmplName, g.pkg); err != nil {
+				errs[i] = fmt.Errorf("executing template %s: %w", spec.tmplName, err)
+				return
+			}
+			files[i] = GeneratedFile{Name: spec.fileName, Content: buf.Bytes()}
+		})
+	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
 	}
 	return files, nil
 }

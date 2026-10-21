@@ -1,11 +1,12 @@
 package generator
 
 import (
+	"go/parser"
+	"go/token"
 	"strings"
 	"testing"
 
 	"github.com/parallelworks/openapi-client-generator/internal/ir"
-	"golang.org/x/tools/imports"
 )
 
 func TestGenerate_StructAndEnum(t *testing.T) {
@@ -127,7 +128,7 @@ func TestGenerate_StructAndEnum(t *testing.T) {
 	}
 }
 
-func TestGenerate_GoimportsSucceeds(t *testing.T) {
+func TestGenerate_OutputParses(t *testing.T) {
 	pkg := &ir.Package{
 		Name: "testpkg",
 		Types: []*ir.TypeDef{
@@ -160,14 +161,8 @@ func TestGenerate_GoimportsSucceeds(t *testing.T) {
 		t.Fatal("expected at least 1 generated file")
 	}
 
-	// Verify goimports can process the output without error
-	_, err = imports.Process(files[0].Name, files[0].Content, &imports.Options{
-		Comments:  true,
-		TabIndent: true,
-		TabWidth:  8,
-	})
-	if err != nil {
-		t.Errorf("goimports failed on generated output: %v\n\nRaw output:\n%s", err, string(files[0].Content))
+	if _, err := parser.ParseFile(token.NewFileSet(), files[0].Name, files[0].Content, parser.ParseComments); err != nil {
+		t.Errorf("generated output does not parse: %v\n\nRaw output:\n%s", err, string(files[0].Content))
 	}
 }
 
