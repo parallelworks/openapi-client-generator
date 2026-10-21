@@ -2,6 +2,8 @@ module github.com/parallelworks/openapi-client-generator
 
 go 1.26.0
 
+toolchain go1.27.3
+
 require (
 	github.com/giraffesyo/openapi-go-naming v0.1.1
 	github.com/pb33f/libopenapi v0.41.6
