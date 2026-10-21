@@ -14,7 +14,7 @@ A spec flows through three stages, one per `internal/` package:
 
 1. **parse** (`internal/parser`): load and validate the spec with libopenapi, resolve `$ref`s.
 2. **analyze** (`internal/analyzer`): lower the spec into the intermediate representation (`internal/ir`): operations, params, types, pagination. This is where naming, disambiguation, and pagination detection happen.
-3. **generate** (`internal/generator`): render the IR through `text/template` files (`internal/templates/*.tmpl`, embedded via `embed.go`) and post-process each file with `goimports` (`WriteFiles`).
+3. **generate** (`internal/generator`): render the IR through `text/template` files (`internal/templates/*.tmpl`, embedded via `embed.go`) then `WriteFiles` fixes each file's imports against a fixed stdlib table and gofmts it (large files print in parallel chunks).
 
 Supporting packages: `internal/naming` (OpenAPI identifier → Go identifier), `cmd/` (the Cobra CLI).
 

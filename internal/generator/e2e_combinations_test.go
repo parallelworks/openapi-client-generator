@@ -96,7 +96,7 @@ func TestE2E_Combinations(t *testing.T) {
 
 // containsCollapsed reports whether haystack holds needle once the runs of
 // whitespace in both are flattened. The generated files reach this test before
-// goimports aligns them, so an assertion written the way the output looks would
+// gofmt aligns them, so an assertion written the way the output looks would
 // depend on alignment that has not happened yet.
 func containsCollapsed(haystack, needle string) bool {
 	return strings.Contains(strings.Join(strings.Fields(haystack), " "), strings.Join(strings.Fields(needle), " "))
