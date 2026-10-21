@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.13](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.12...v0.2.13) (2026-10-21)
+
+
+### Features
+
+* releases ship prebuilt binaries, so CI can download the generator instead of compiling it ([#141](https://github.com/parallelworks/openapi-client-generator/issues/141)) ([46a2edf](https://github.com/parallelworks/openapi-client-generator/commit/46a2edfeac612ac4894b1570866476a80585330f))
+
+
+### Performance Improvements
+
+* **generator:** generating a large client is 3.5x faster and the generator builds with 45% less CPU ([#139](https://github.com/parallelworks/openapi-client-generator/issues/139)) ([27bcebe](https://github.com/parallelworks/openapi-client-generator/commit/27bcebe221ca5d1d19f8a910a8526e3fc6947d90))
+
 ## [0.2.12](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.11...v0.2.12) (2026-10-03)
 
 
