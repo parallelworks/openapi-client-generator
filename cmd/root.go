@@ -1,8 +1,23 @@
 package cmd
 
 import (
+	"runtime/debug"
+
 	"github.com/spf13/cobra"
 )
+
+// version is set by the release build; `go install` and `go tool` builds
+// report their module version instead.
+var version string
+
+func init() {
+	if version == "" {
+		if info, ok := debug.ReadBuildInfo(); ok {
+			version = info.Main.Version
+		}
+	}
+	rootCmd.Version = version
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "openapi-client-generator",

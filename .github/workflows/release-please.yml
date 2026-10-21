@@ -21,3 +21,54 @@ jobs:
       pull-requests: write # open and update the release PR
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+
+  # Prebuilt binaries let CI download the generator instead of compiling it
+  # and libopenapi with `go tool` on every cold run.
+  binaries:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # upload release assets
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          mkdir dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS=${target%/*} GOARCH=${target#*/}
+            name="openapi-client-generator_${TAG#v}_${GOOS}_${GOARCH}"
+            ext=""; [ "$GOOS" = windows ] && ext=".exe"
+            mkdir "$name"
+            GOOS=$GOOS GOARCH=$GOARCH go build -trimpath \
+              -ldflags "-s -w -X github.com/parallelworks/openapi-client-generator/cmd.version=${TAG}" \
+              -o "$name/openapi-client-generator$ext" .
+            cp LICENSE README.md "$name/"
+            tar -czf "dist/$name.tar.gz" "$name"
+          done
+          (cd dist && sha256sum -- *.tar.gz > checksums.txt)
+
+      - name: Upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
