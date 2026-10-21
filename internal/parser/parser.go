@@ -1,13 +1,10 @@
 package parser
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"unicode/utf8"
 
 	"github.com/pb33f/libopenapi/datamodel"
 	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
@@ -53,7 +50,7 @@ func Parse(specPath string, cfg Config) (*ParseResult, error) {
 
 	// The root libopenapi package would do these steps for us, but importing it
 	// compiles its diffing and Arazzo models too, which dominate a cold build.
-	info, err := extractSpecInfo(specBytes, docConfig)
+	info, err := datamodel.ExtractSpecInfoWithConfig(specBytes, docConfig)
 	if err != nil {
 		return nil, fmt.Errorf("parsing spec: %w", err)
 	}
@@ -82,44 +79,4 @@ func Parse(specPath string, cfg Config) (*ParseResult, error) {
 	lowbase.SchemaQuickHashMap.Clear()
 
 	return &ParseResult{Model: model, Version: info.Version}, nil
-}
-
-// extractSpecInfo is datamodel.ExtractSpecInfoWithConfig with a faster parse
-// for JSON documents, which are the common machine-generated case.
-func extractSpecInfo(spec []byte, cfg *datamodel.DocumentConfiguration) (*datamodel.SpecInfo, error) {
-	trimmed := bytes.TrimSpace(spec)
-	if len(trimmed) == 0 || trimmed[0] != '{' || trimmed[len(trimmed)-1] != '}' || !utf8.Valid(spec) {
-		return datamodel.ExtractSpecInfoWithConfig(spec, cfg)
-	}
-	root, err := parseJSONNode(spec)
-	if err != nil {
-		return datamodel.ExtractSpecInfoWithConfig(spec, cfg)
-	}
-	_, openAPI3 := utils.FindKeyNode(utils.OpenApi3, root.Content)
-	_, openAPI2 := utils.FindKeyNode(utils.OpenApi2, root.Content)
-	_, asyncAPI := utils.FindKeyNode(utils.AsyncApi, root.Content)
-	if openAPI3 == nil || openAPI2 != nil || asyncAPI != nil {
-		return datamodel.ExtractSpecInfoWithConfig(spec, cfg)
-	}
-
-	// Every other SpecInfo field follows from the version alone, so a one-key
-	// document reuses libopenapi's version handling without its slow parse.
-	stub, err := json.Marshal(map[string]string{utils.OpenApi3: openAPI3.Value})
-	if err != nil {
-		return nil, err
-	}
-	info, err := datamodel.ExtractSpecInfoWithConfig(stub, cfg)
-	if err != nil {
-		return datamodel.ExtractSpecInfoWithConfig(spec, cfg)
-	}
-	info.SpecBytes = &spec
-	info.RootNode = root
-	info.NumLines = bytes.Count(spec, []byte{'\n'}) + 1
-	info.OriginalIndentation = utils.DetermineWhitespaceLengthBytes(spec)
-	if info.SpecFormat == datamodel.OAS31 || info.SpecFormat == datamodel.OAS32 {
-		if _, self := utils.FindKeyNode("$self", root.Content); self != nil && self.Value != "" {
-			info.Self = self.Value
-		}
-	}
-	return info, nil
 }
