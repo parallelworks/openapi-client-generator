@@ -79,12 +79,12 @@ func (p *jsonNodeParser) value() (*yaml.Node, error) {
 	}
 	n := p.node()
 	n.Line, n.Column = p.line, p.col
-	switch c := p.data[p.pos]; {
-	case c == '{':
+	switch p.data[p.pos] {
+	case '{':
 		return n, p.container(n, yaml.MappingNode, "!!map", '}')
-	case c == '[':
+	case '[':
 		return n, p.container(n, yaml.SequenceNode, "!!seq", ']')
-	case c == '"':
+	case '"':
 		s, err := p.str()
 		if err != nil {
 			return nil, err
