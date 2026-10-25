@@ -1,0 +1,348 @@
+package generator
+
+import "testing"
+
+const redirectSpec = `openapi: 3.1.0
+info: { title: redirects, version: "1" }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+security:
+  - bearer: []
+paths:
+  /thing:
+    get:
+      operationId: getThing
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { type: string } }
+    post:
+      operationId: createThing
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { type: string } }
+  /search:
+    get:
+      operationId: search
+      requestBody:
+        content:
+          application/json: { schema: { type: string } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json: { schema: { type: string } }
+`
+
+// TestE2E_Redirects pins the generated client's redirect policy: no credential
+// leaves the origin that was asked, and nothing is sent over plain http.
+func TestE2E_Redirects(t *testing.T) {
+	files, _ := generateFromSpec(t, redirectSpec, "redirectapi")
+
+	runGeneratedWireTest(t, files, "redirects", `package redirectapi
+
+import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func fastRetry() ClientOption {
+	cfg := DefaultRetryConfig()
+	cfg.BaseDelay = time.Millisecond
+	cfg.MaxDelay = time.Millisecond
+	return WithRetry(cfg)
+}
+
+type received struct {
+	header atomic.Value
+	hits   atomic.Int32
+}
+
+func (rc *received) Header() http.Header {
+	h, _ := rc.header.Load().(http.Header)
+	return h
+}
+
+func recording(rc *received) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rc.hits.Add(1)
+		rc.header.Store(r.Header.Clone())
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`+"`"+`"moved"`+"`"+`))
+	}
+}
+
+// elsewhere is another origin on the same host, to which net/http itself would carry Authorization.
+func elsewhere(t *testing.T) (*httptest.Server, *received) {
+	var rc received
+	srv := httptest.NewServer(recording(&rc))
+	t.Cleanup(srv.Close)
+	return srv, &rc
+}
+
+func redirecting(t *testing.T, target string) *httptest.Server {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func withHeaders(req *http.Request, next RoundTripFunc) (*http.Response, error) {
+	req.Header.Set("X-Api-Key", "secret")
+	req.Header["x-secret"] = []string{"secret"}
+	return next(req)
+}
+
+func TestAGetFollowsARedirectElsewhereWithoutItsCredentials(t *testing.T) {
+	other, rc := elsewhere(t)
+	client := NewClient(redirecting(t, other.URL).URL, WithAuth(&BearerAuth{Token: "secret"}), WithMiddleware(withHeaders), WithHTTPClient(&http.Client{}))
+
+	got, err := client.GetThing(t.Context())
+	if err != nil {
+		t.Fatalf("GetThing: %v", err)
+	}
+	if *got != "moved" {
+		t.Errorf("got %q", *got)
+	}
+	for _, name := range []string{"Authorization", "X-Api-Key", "X-Secret"} {
+		if v := rc.Header().Get(name); v != "" {
+			t.Errorf("the other origin received %s %q", name, v)
+		}
+	}
+	if rc.Header().Get("Accept") == "" {
+		t.Error("the other origin did not receive Accept")
+	}
+}
+
+func TestAPostStopsAtARedirectElsewhere(t *testing.T) {
+	other, rc := elsewhere(t)
+	client := NewClient(redirecting(t, other.URL).URL, WithAuth(&BearerAuth{Token: "secret"}))
+
+	_, err := client.CreateThing(t.Context())
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("got %v, want the redirect handed back", err)
+	}
+	if rc.hits.Load() != 0 {
+		t.Error("the request was sent to the other origin")
+	}
+}
+
+func TestAPostSeeOtherElsewhereFollowsAsAGetWithoutItsCredentials(t *testing.T) {
+	other, rc := elsewhere(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusSeeOther)
+	}))
+	t.Cleanup(srv.Close)
+	client := NewClient(srv.URL, WithAuth(&BearerAuth{Token: "secret"}), WithMiddleware(withHeaders))
+
+	got, err := client.CreateThing(t.Context())
+	if err != nil {
+		t.Fatalf("CreateThing: %v", err)
+	}
+	if *got != "moved" {
+		t.Errorf("got %q", *got)
+	}
+	for _, name := range []string{"Authorization", "X-Api-Key", "X-Secret"} {
+		if v := rc.Header().Get(name); v != "" {
+			t.Errorf("the other origin received %s %q", name, v)
+		}
+	}
+}
+
+func TestAPostRedirectedElsewhereBecomesAGetOnlyForASeeOther(t *testing.T) {
+	for _, status := range []int{http.StatusMovedPermanently, http.StatusFound} {
+		other, rc := elsewhere(t)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, other.URL+r.URL.Path, status)
+		}))
+		t.Cleanup(srv.Close)
+		client := NewClient(srv.URL, WithAuth(&BearerAuth{Token: "secret"}))
+
+		_, err := client.CreateThing(t.Context())
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != status {
+			t.Fatalf("a POST answered %d: got %v, want the redirect handed back", status, err)
+		}
+		if rc.hits.Load() != 0 {
+			t.Errorf("a POST answered %d took another origin's page for its answer", status)
+		}
+	}
+}
+
+func TestARangedGetKeepsItsRangeElsewhere(t *testing.T) {
+	other, rc := elsewhere(t)
+	ranged := func(req *http.Request, next RoundTripFunc) (*http.Response, error) {
+		req.Header.Set("Range", "bytes=0-1")
+		req.Header.Set("If-Range", `+"`"+`"v1"`+"`"+`)
+		req.Header.Set("If-None-Match", `+"`"+`"v0"`+"`"+`)
+		return next(req)
+	}
+	client := NewClient(redirecting(t, other.URL).URL, WithAuth(&BearerAuth{Token: "secret"}), WithMiddleware(ranged))
+
+	if _, err := client.GetThing(t.Context()); err != nil {
+		t.Fatalf("GetThing: %v", err)
+	}
+	for name, want := range map[string]string{"Range": "bytes=0-1", "If-Range": `+"`"+`"v1"`+"`"+`, "If-None-Match": `+"`"+`"v0"`+"`"+`} {
+		if got := rc.Header().Get(name); got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+	if a := rc.Header().Get("Authorization"); a != "" {
+		t.Errorf("the other origin received Authorization %q", a)
+	}
+}
+
+func TestAClientsOwnRedirectRefusalIsNotRetried(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Redirect(w, r, "/elsewhere", http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	own := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("stopped after a redirect this caller refuses") }}
+	client := NewClient(srv.URL, fastRetry(), WithHTTPClient(own))
+
+	if _, err := client.GetThing(t.Context()); err == nil {
+		t.Fatal("expected the caller's refusal")
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("calls = %d, want a single attempt", n)
+	}
+}
+
+func TestAGetWithABodyStopsAtARedirectElsewhere(t *testing.T) {
+	other, rc := elsewhere(t)
+	client := NewClient(redirecting(t, other.URL).URL)
+
+	query := "secret"
+	_, err := client.Search(t.Context(), &query)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("got %v, want the redirect handed back", err)
+	}
+	if rc.hits.Load() != 0 {
+		t.Error("the body was sent to the other origin")
+	}
+}
+
+func TestAPostFollowsARedirectOnItsOrigin(t *testing.T) {
+	var rc received
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /thing", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/moved", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("/moved", recording(&rc))
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	for i, base := range []string{srv.URL, strings.Replace(srv.URL, "://", "://user:pass@", 1)} {
+		client := NewClient(base, WithAuth(&BearerAuth{Token: "secret"}))
+		if _, err := client.CreateThing(t.Context()); err != nil {
+			t.Fatalf("CreateThing on %s: %v", base, err)
+		}
+		if n := rc.hits.Load(); n != int32(i+1) {
+			t.Fatalf("the redirect on %s was not followed", base)
+		}
+		if a := rc.Header().Get("Authorization"); a != "Bearer secret" {
+			t.Errorf("Authorization = %q on %s, want the credential kept on its origin", a, base)
+		}
+	}
+}
+
+func TestAnUpgradeToHTTPSOnAnotherPortIsAnotherOrigin(t *testing.T) {
+	var rc received
+	secure := httptest.NewTLSServer(recording(&rc))
+	t.Cleanup(secure.Close)
+	client := NewClient(redirecting(t, secure.URL).URL, WithAuth(&BearerAuth{Token: "secret"}), WithHTTPClient(secure.Client()))
+
+	if _, err := client.GetThing(t.Context()); err != nil {
+		t.Fatalf("GetThing: %v", err)
+	}
+	if a := rc.Header().Get("Authorization"); a != "" {
+		t.Errorf("another port received Authorization %q", a)
+	}
+}
+
+func TestARedirectToPlainHTTPIsRefusedAndNotRetried(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Redirect(w, r, "http://"+r.Host+r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	client := NewClient(srv.URL, fastRetry(), WithHTTPClient(srv.Client()))
+
+	_, err := client.GetThing(t.Context())
+	if !errors.Is(err, ErrInsecureRedirect) {
+		t.Fatalf("got %v, want ErrInsecureRedirect", err)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("calls = %d, want a single attempt", n)
+	}
+}
+
+func TestTooManyRedirectsAreNotRetried(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Redirect(w, r, r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	client := NewClient(srv.URL, fastRetry())
+
+	_, err := client.GetThing(t.Context())
+	if !errors.Is(err, ErrTooManyRedirects) {
+		t.Fatalf("got %v, want ErrTooManyRedirects", err)
+	}
+	if n := calls.Load(); n != 10 {
+		t.Errorf("calls = %d, want one chain of redirects", n)
+	}
+}
+
+func TestAClientsOwnRedirectPolicyIsKept(t *testing.T) {
+	other, rc := elsewhere(t)
+	own := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := NewClient(redirecting(t, other.URL).URL, WithHTTPClient(own))
+
+	if _, err := client.GetThing(t.Context()); err == nil {
+		t.Fatal("expected the redirect to be handed back")
+	}
+	if rc.hits.Load() != 0 {
+		t.Error("the client's own policy was replaced")
+	}
+}
+
+type countingTransport struct{ n atomic.Int32 }
+
+func (c *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.n.Add(1)
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+func TestTheHTTPClientIsReadAtEachRequest(t *testing.T) {
+	other, _ := elsewhere(t)
+	hc := &http.Client{}
+	client := NewClient(other.URL, WithHTTPClient(hc))
+	var transport countingTransport
+	hc.Transport = &transport
+
+	if _, err := client.GetThing(t.Context()); err != nil {
+		t.Fatalf("GetThing: %v", err)
+	}
+	if transport.n.Load() != 1 {
+		t.Error("a Transport set after NewClient was not used")
+	}
+}
+`)
+}

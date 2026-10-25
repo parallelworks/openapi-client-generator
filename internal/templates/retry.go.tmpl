@@ -155,8 +155,12 @@ func isRetryableNetworkError(err error) bool {
 	if errors.As(err, &recordErr) {
 		return false
 	}
+	if errors.Is(err, ErrInsecureRedirect) || errors.Is(err, ErrTooManyRedirects) {
+		return false
+	}
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
+		// A caller's own CheckRedirect refuses the way net/http's does, with an error that starts "stopped after".
 		msg := urlErr.Err.Error()
 		return !strings.Contains(msg, "unsupported protocol scheme") && !strings.HasPrefix(msg, "stopped after ")
 	}

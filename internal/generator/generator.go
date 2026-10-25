@@ -50,6 +50,7 @@ func (g *Generator) Generate() ([]GeneratedFile, error) {
 		{"operations.go.tmpl", "operations.go"},
 		{"pagination.go.tmpl", "pagination.go"},
 		{"retry.go.tmpl", "retry.go"},
+		{"redirect.go.tmpl", "redirect.go"},
 		{"middleware.go.tmpl", "middleware.go"},
 		{"auth.go.tmpl", "auth.go"},
 		{"errors.go.tmpl", "errors.go"},

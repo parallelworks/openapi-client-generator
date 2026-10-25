@@ -16,6 +16,7 @@ Given any OpenAPI 3.1 (or 3.0) spec, it outputs a complete, idiomatic Go client 
 - **Error handling** — `APIError` with sentinel errors (`errors.Is`), typed error wrappers with parsed response bodies (`errors.As`), readable messages via `x-ms-primary-error-message`, RFC 9457 problem details via `Problem()`
 - **Pagination**: auto-detected cursor, offset, and page pagination with a generic `PageIterator[T]`
 - **Retries**: configurable exponential backoff with jitter, honoring `Retry-After` in both forms and declining a wait past `MaxDelay`
+- **Redirects**: followed on the origin that was asked; elsewhere only a GET or HEAD without a body, stripped of its credentials, and never down to plain http
 - **Middleware** — composable request/response middleware chain
 - **OpenAPI 3.1**: JSON Schema 2020-12, nullable type arrays, `$ref` resolution ([what is not generated](#not-supported))
 
@@ -72,6 +73,7 @@ gen/petstore/
 ├── operations.go    # ListPets(), CreatePet(), GetPetByID(), DeletePet()
 ├── options.go       # WithHTTPClient(), WithUserAgent()
 ├── pagination.go    # PageIterator[T], ListPetsIter()
+├── redirect.go      # CheckRedirect, SafeRedirects(), ErrInsecureRedirect
 ├── retry.go         # RetryConfig, WithRetry(), WithDefaultRetry()
 └── types.go         # Pet, PetStatus, PetList, CreatePetRequest, Error
 ```
