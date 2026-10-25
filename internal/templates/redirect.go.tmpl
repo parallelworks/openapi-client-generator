@@ -4,7 +4,6 @@ package {{ .Name }}
 
 import (
 	"errors"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,13 +12,16 @@ import (
 // ErrInsecureRedirect is a redirect from https to plain http, which the client never follows.
 var ErrInsecureRedirect = errors.New("stopped after a redirect from https to plain http")
 
-// ErrTooManyRedirects is a request redirected more than 10 times.
+// ErrTooManyRedirects is a request redirected 10 times.
 var ErrTooManyRedirects = errors.New("stopped after 10 redirects")
 
 // redirectHeaders are the only headers a redirect to another origin carries, since any other may hold a credential.
-var redirectHeaders = []string{"Accept", "Accept-Language", "User-Agent"}
+var redirectHeaders = []string{
+	"Accept", "Accept-Encoding", "Accept-Language", "User-Agent",
+	"Range", "If-Range", "If-Match", "If-None-Match", "If-Modified-Since", "If-Unmodified-Since",
+}
 
-// CheckRedirect follows a redirect on its origin, and elsewhere only a GET or HEAD stripped of its credentials.
+// CheckRedirect follows a redirect on its origin, and elsewhere only a GET or HEAD without a body, stripped of its credentials.
 func CheckRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return ErrTooManyRedirects
@@ -30,19 +32,21 @@ func CheckRedirect(req *http.Request, via []*http.Request) error {
 	if sameOrigin(via[0].URL, req.URL) {
 		return nil
 	}
-	if method := via[0].Method; method != http.MethodGet && method != http.MethodHead && method != "" {
+	// req is the redirected request (RFC 9110 section 15.4), so a 303 after a POST arrives here as a GET without a body.
+	if req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != "" {
 		return http.ErrUseLastResponse
 	}
-	// net/http copies Authorization to a subdomain or another port of the same host, and every other header anywhere.
-	for name := range req.Header {
-		keep := false
-		for _, allowed := range redirectHeaders {
-			keep = keep || http.CanonicalHeaderKey(name) == allowed
-		}
-		if !keep {
-			req.Header.Del(name)
+	if req.Body != nil && req.Body != http.NoBody {
+		return http.ErrUseLastResponse
+	}
+	// net/http copies every header anywhere under the key it was set with, which Header.Del would miss when not canonical.
+	kept := http.Header{}
+	for _, name := range redirectHeaders {
+		if values := req.Header.Values(name); len(values) > 0 {
+			kept[name] = values
 		}
 	}
+	req.Header = kept
 	return nil
 }
 
@@ -59,28 +63,31 @@ func SafeRedirects(c *http.Client) *http.Client {
 	return &safe
 }
 
-// sameOrigin compares scheme, host and port (RFC 6454), counting http up to https on the same host as staying.
+// sameOrigin compares scheme, host and port (RFC 6454), counting http on 80 up to https on 443 of the same host as staying.
 func sameOrigin(from, to *url.URL) bool {
-	if to.User != nil {
+	if to.User != nil && to.User.String() != from.User.String() {
+		return false
+	}
+	if !strings.EqualFold(from.Hostname(), to.Hostname()) {
 		return false
 	}
 	fromScheme, toScheme := strings.ToLower(from.Scheme), strings.ToLower(to.Scheme)
+	fromPort, toPort := redirectPort(from), redirectPort(to)
 	switch {
 	case fromScheme == toScheme:
-		return redirectAuthority(from) == redirectAuthority(to)
+		return fromPort == toPort
 	case fromScheme == "http" && toScheme == "https":
-		return strings.EqualFold(from.Hostname(), to.Hostname())
+		return fromPort == "80" && toPort == "443"
 	}
 	return false
 }
 
-func redirectAuthority(u *url.URL) string {
-	port := u.Port()
-	if port == "" {
-		port = "443"
-		if strings.EqualFold(u.Scheme, "http") {
-			port = "80"
-		}
+func redirectPort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
 	}
-	return net.JoinHostPort(strings.ToLower(u.Hostname()), port)
+	if strings.EqualFold(u.Scheme, "http") {
+		return "80"
+	}
+	return "443"
 }

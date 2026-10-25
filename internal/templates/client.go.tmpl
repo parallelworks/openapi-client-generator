@@ -58,7 +58,6 @@ func NewClient(baseURL string, opts ...ClientOption) *Client {
 	for _, opt := range opts {
 		opt(c)
 	}
-	c.httpClient = SafeRedirects(c.httpClient)
 	return c
 }
 
@@ -122,9 +121,10 @@ func (c *Client) send(ctx context.Context, method string, path string, body any,
 		}
 	}
 
-	// Build the transport function.
+	// Applied per call, not in NewClient, so a change to the caller's http.Client after NewClient still takes effect.
+	httpClient := SafeRedirects(c.httpClient)
 	transport := func(req *http.Request) (*http.Response, error) {
-		return c.httpClient.Do(req)
+		return httpClient.Do(req)
 	}
 
 	// Wrap with middleware chain (applied in reverse order so first middleware runs first).
