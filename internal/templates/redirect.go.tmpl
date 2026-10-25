@@ -21,7 +21,7 @@ var redirectHeaders = []string{
 	"Range", "If-Range", "If-Match", "If-None-Match", "If-Modified-Since", "If-Unmodified-Since",
 }
 
-// CheckRedirect follows a redirect on its origin, and elsewhere only a GET or HEAD without a body, stripped of its credentials.
+// CheckRedirect follows a redirect on its origin; elsewhere only a bodiless GET or HEAD, or a 303's GET, without credentials.
 func CheckRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return ErrTooManyRedirects
@@ -33,7 +33,9 @@ func CheckRedirect(req *http.Request, via []*http.Request) error {
 		return nil
 	}
 	// req is the redirected request (RFC 9110 section 15.4), so a 303 after a POST arrives here as a GET without a body.
-	if req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != "" {
+	// net/http turns a write into a GET after a 301 or 302 too, which would take another origin's page for its answer.
+	sent := via[len(via)-1].Method
+	if !bodilessMethod(req.Method) || (!bodilessMethod(sent) && (req.Response == nil || req.Response.StatusCode != http.StatusSeeOther)) {
 		return http.ErrUseLastResponse
 	}
 	if req.Body != nil && req.Body != http.NoBody {
@@ -48,6 +50,10 @@ func CheckRedirect(req *http.Request, via []*http.Request) error {
 	}
 	req.Header = kept
 	return nil
+}
+
+func bodilessMethod(method string) bool {
+	return method == http.MethodGet || method == http.MethodHead || method == ""
 }
 
 // SafeRedirects is c following redirects by CheckRedirect, unless it has a redirect policy of its own.

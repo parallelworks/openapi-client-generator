@@ -160,6 +160,26 @@ func TestAPostSeeOtherElsewhereFollowsAsAGetWithoutItsCredentials(t *testing.T) 
 	}
 }
 
+func TestAPostRedirectedElsewhereBecomesAGetOnlyForASeeOther(t *testing.T) {
+	for _, status := range []int{http.StatusMovedPermanently, http.StatusFound} {
+		other, rc := elsewhere(t)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, other.URL+r.URL.Path, status)
+		}))
+		t.Cleanup(srv.Close)
+		client := NewClient(srv.URL, WithAuth(&BearerAuth{Token: "secret"}))
+
+		_, err := client.CreateThing(t.Context())
+		var apiErr *APIError
+		if !errors.As(err, &apiErr) || apiErr.StatusCode != status {
+			t.Fatalf("a POST answered %d: got %v, want the redirect handed back", status, err)
+		}
+		if rc.hits.Load() != 0 {
+			t.Errorf("a POST answered %d took another origin's page for its answer", status)
+		}
+	}
+}
+
 func TestARangedGetKeepsItsRangeElsewhere(t *testing.T) {
 	other, rc := elsewhere(t)
 	ranged := func(req *http.Request, next RoundTripFunc) (*http.Response, error) {
