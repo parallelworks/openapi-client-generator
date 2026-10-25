@@ -155,10 +155,12 @@ func isRetryableNetworkError(err error) bool {
 	if errors.As(err, &recordErr) {
 		return false
 	}
+	if errors.Is(err, ErrInsecureRedirect) || errors.Is(err, ErrTooManyRedirects) {
+		return false
+	}
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
-		msg := urlErr.Err.Error()
-		return !strings.Contains(msg, "unsupported protocol scheme") && !strings.HasPrefix(msg, "stopped after ")
+		return !strings.Contains(urlErr.Err.Error(), "unsupported protocol scheme")
 	}
 	return true
 }

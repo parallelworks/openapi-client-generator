@@ -64,6 +64,7 @@ func TestE2E_PetstoreGeneration(t *testing.T) {
 		"operations.go": false,
 		"pagination.go": false,
 		"retry.go":      false,
+		"redirect.go":   false,
 		"middleware.go": false,
 		"auth.go":       false,
 		"errors.go":     false,
