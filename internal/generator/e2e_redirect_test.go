@@ -47,6 +47,7 @@ func TestE2E_Redirects(t *testing.T) {
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -204,20 +205,26 @@ func TestARangedGetKeepsItsRangeElsewhere(t *testing.T) {
 }
 
 func TestAClientsOwnRedirectRefusalIsNotRetried(t *testing.T) {
-	var calls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		http.Redirect(w, r, "/elsewhere", http.StatusFound)
-	}))
-	t.Cleanup(srv.Close)
-	own := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("stopped after a redirect this caller refuses") }}
-	client := NewClient(srv.URL, fastRetry(), WithHTTPClient(own))
+	for _, refusal := range []error{
+		errors.New("stopped after a redirect this caller refuses"),
+		errors.New("redirect refused"),
+		fmt.Errorf("refusing: %w", ErrInsecureRedirect),
+	} {
+		var calls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			http.Redirect(w, r, "/elsewhere", http.StatusFound)
+		}))
+		t.Cleanup(srv.Close)
+		own := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return refusal }}
+		client := NewClient(srv.URL, fastRetry(), WithHTTPClient(own))
 
-	if _, err := client.GetThing(t.Context()); err == nil {
-		t.Fatal("expected the caller's refusal")
-	}
-	if n := calls.Load(); n != 1 {
-		t.Errorf("calls = %d, want a single attempt", n)
+		if _, err := client.GetThing(t.Context()); !errors.Is(err, refusal) {
+			t.Fatalf("got %v, want the caller's refusal %q", err, refusal)
+		}
+		if n := calls.Load(); n != 1 {
+			t.Errorf("calls = %d for %q, want a single attempt", n, refusal)
+		}
 	}
 }
 
@@ -303,6 +310,33 @@ func TestTooManyRedirectsAreNotRetried(t *testing.T) {
 
 	_, err := client.GetThing(t.Context())
 	if !errors.Is(err, ErrTooManyRedirects) {
+		t.Fatalf("got %v, want ErrTooManyRedirects", err)
+	}
+	if n := calls.Load(); n != 10 {
+		t.Errorf("calls = %d, want one chain of redirects", n)
+	}
+}
+
+func TestARedirectRefusalAMiddlewareDropsTheResponseOfIsNotRetried(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Redirect(w, r, r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	dropping := func(req *http.Request, next RoundTripFunc) (*http.Response, error) {
+		resp, err := next(req)
+		if err != nil {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			return nil, err
+		}
+		return resp, nil
+	}
+	client := NewClient(srv.URL, fastRetry(), WithMiddleware(dropping))
+
+	if _, err := client.GetThing(t.Context()); !errors.Is(err, ErrTooManyRedirects) {
 		t.Fatalf("got %v, want ErrTooManyRedirects", err)
 	}
 	if n := calls.Load(); n != 10 {
