@@ -368,7 +368,7 @@ func TestACallersRefusalAMiddlewareDropsTheResponseOfIsNotRetried(t *testing.T) 
 	if !errors.As(err, &refused) || !errors.Is(err, refusal) {
 		t.Fatalf("got %v, want a *RedirectRefusedError wrapping the caller's refusal", err)
 	}
-	if err.Error() == "" || !strings.HasSuffix(err.Error(), "redirect refused") {
+	if !strings.HasSuffix(err.Error(), "redirect refused") {
 		t.Errorf("message = %q, want the caller's own", err.Error())
 	}
 	if n := calls.Load(); n != 1 {
@@ -394,11 +394,12 @@ func TestTheSDKsRefusalsAreRedirectRefusedErrors(t *testing.T) {
 	}{
 		{NewClient(secure.URL, WithHTTPClient(secure.Client())), ErrInsecureRedirect},
 		{NewClient(looping.URL), ErrTooManyRedirects},
+		{NewClient(secure.URL, WithHTTPClient(SafeRedirects(secure.Client()))), ErrInsecureRedirect},
 	} {
 		_, err := tc.client.GetThing(t.Context())
 		var refused *RedirectRefusedError
-		if !errors.As(err, &refused) || !errors.Is(err, tc.want) {
-			t.Errorf("got %v, want a *RedirectRefusedError wrapping %v", err, tc.want)
+		if !errors.As(err, &refused) || refused.Err != tc.want {
+			t.Errorf("got %v, want a single *RedirectRefusedError wrapping %v", err, tc.want)
 		}
 	}
 }
