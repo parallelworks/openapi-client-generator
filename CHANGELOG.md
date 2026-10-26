@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.13...v0.3.0) (2026-10-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* generated clients keep credentials on the origin a request was sent to across redirects ([#146](https://github.com/parallelworks/openapi-client-generator/issues/146))
+
+### Features
+
+* generated clients keep credentials on the origin a request was sent to across redirects ([#146](https://github.com/parallelworks/openapi-client-generator/issues/146)) ([3824f78](https://github.com/parallelworks/openapi-client-generator/commit/3824f782b8f7d52a427183c4108ad003e802fdf6))
+
+
+### Bug Fixes
+
+* **deps:** build with Go 1.27.3, which distrusts eMudhra's compromised intermediate CAs ([#144](https://github.com/parallelworks/openapi-client-generator/issues/144)) ([7b661d7](https://github.com/parallelworks/openapi-client-generator/commit/7b661d7ff2dff2acdee87a459f9379e5a349a817))
+
 ## [0.2.13](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.12...v0.2.13) (2026-10-21)
 
 
