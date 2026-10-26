@@ -203,6 +203,9 @@ func (c *Client) send(ctx context.Context, method string, path string, body any,
 			}
 			return nil, fmt.Errorf("executing request: %w", err)
 		}
+		if resp == nil {
+			return nil, errors.New("executing request: middleware returned no response and no error")
+		}
 
 		// Check if we should retry.
 		if c.retryConfig != nil && attempt < maxAttempts-1 && shouldRetryStatus(method, resp.StatusCode, *c.retryConfig) && withinRetryBudget(resp, *c.retryConfig) {

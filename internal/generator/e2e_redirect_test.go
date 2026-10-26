@@ -530,6 +530,23 @@ func TestARedirectRefusedErrorAnswersForItsError(t *testing.T) {
 	}
 }
 
+func TestAMiddlewareThatReturnsNothingIsAnErrorAndNotRetried(t *testing.T) {
+	var calls atomic.Int32
+	empty := func(*http.Request, RoundTripFunc) (*http.Response, error) {
+		calls.Add(1)
+		return nil, nil
+	}
+	client := NewClient("http://example.test", fastRetry(), WithMiddleware(empty))
+
+	_, err := client.GetThing(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "middleware returned no response and no error") {
+		t.Fatalf("got %v, want the middleware's missing response", err)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("calls = %d, want a single attempt", n)
+	}
+}
+
 func TestAClientsOwnRedirectPolicyIsKept(t *testing.T) {
 	other, rc := elsewhere(t)
 	own := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
