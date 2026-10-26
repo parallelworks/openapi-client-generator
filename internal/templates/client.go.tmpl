@@ -189,8 +189,9 @@ func (c *Client) send(ctx context.Context, method string, path string, body any,
 			if resp != nil {
 				resp.Body.Close()
 			}
-			// Retry idempotent requests on transient network errors.
-			if c.retryConfig != nil && attempt < maxAttempts-1 && isIdempotentMethod(method) && isRetryableNetworkError(err) {
+			// Retry idempotent requests on transient network errors. A response with
+			// the error is net/http's answer to a CheckRedirect refusal, whatever it says.
+			if c.retryConfig != nil && resp == nil && attempt < maxAttempts-1 && isIdempotentMethod(method) && isRetryableNetworkError(err) {
 				timer := time.NewTimer(retryDelay(attempt, *c.retryConfig, nil))
 				select {
 				case <-ctx.Done():

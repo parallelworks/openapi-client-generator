@@ -47,6 +47,7 @@ func TestE2E_Redirects(t *testing.T) {
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -204,20 +205,26 @@ func TestARangedGetKeepsItsRangeElsewhere(t *testing.T) {
 }
 
 func TestAClientsOwnRedirectRefusalIsNotRetried(t *testing.T) {
-	var calls atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		http.Redirect(w, r, "/elsewhere", http.StatusFound)
-	}))
-	t.Cleanup(srv.Close)
-	own := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("stopped after a redirect this caller refuses") }}
-	client := NewClient(srv.URL, fastRetry(), WithHTTPClient(own))
+	for _, refusal := range []error{
+		errors.New("stopped after a redirect this caller refuses"),
+		errors.New("redirect refused"),
+		fmt.Errorf("refusing: %w", ErrInsecureRedirect),
+	} {
+		var calls atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			http.Redirect(w, r, "/elsewhere", http.StatusFound)
+		}))
+		t.Cleanup(srv.Close)
+		own := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return refusal }}
+		client := NewClient(srv.URL, fastRetry(), WithHTTPClient(own))
 
-	if _, err := client.GetThing(t.Context()); err == nil {
-		t.Fatal("expected the caller's refusal")
-	}
-	if n := calls.Load(); n != 1 {
-		t.Errorf("calls = %d, want a single attempt", n)
+		if _, err := client.GetThing(t.Context()); !errors.Is(err, refusal) {
+			t.Fatalf("got %v, want the caller's refusal %q", err, refusal)
+		}
+		if n := calls.Load(); n != 1 {
+			t.Errorf("calls = %d for %q, want a single attempt", n, refusal)
+		}
 	}
 }
 
@@ -307,6 +314,106 @@ func TestTooManyRedirectsAreNotRetried(t *testing.T) {
 	}
 	if n := calls.Load(); n != 10 {
 		t.Errorf("calls = %d, want one chain of redirects", n)
+	}
+}
+
+func TestARedirectRefusalAMiddlewareDropsTheResponseOfIsNotRetried(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Redirect(w, r, r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	dropping := func(req *http.Request, next RoundTripFunc) (*http.Response, error) {
+		resp, err := next(req)
+		if err != nil {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			return nil, err
+		}
+		return resp, nil
+	}
+	client := NewClient(srv.URL, fastRetry(), WithMiddleware(dropping))
+
+	if _, err := client.GetThing(t.Context()); !errors.Is(err, ErrTooManyRedirects) {
+		t.Fatalf("got %v, want ErrTooManyRedirects", err)
+	}
+	if n := calls.Load(); n != 10 {
+		t.Errorf("calls = %d, want one chain of redirects", n)
+	}
+}
+
+func TestACallersRefusalAMiddlewareDropsTheResponseOfIsNotRetried(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Redirect(w, r, "/elsewhere", http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	refusal := errors.New("redirect refused")
+	own := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return refusal }}
+	dropping := func(req *http.Request, next RoundTripFunc) (*http.Response, error) {
+		resp, err := next(req)
+		if resp != nil && err != nil {
+			resp.Body.Close()
+			resp = nil
+		}
+		return resp, err
+	}
+	client := NewClient(srv.URL, fastRetry(), WithHTTPClient(own), WithMiddleware(dropping))
+
+	_, err := client.GetThing(t.Context())
+	var refused *RedirectRefusedError
+	if !errors.As(err, &refused) || !errors.Is(err, refusal) {
+		t.Fatalf("got %v, want a *RedirectRefusedError wrapping the caller's refusal", err)
+	}
+	if !strings.HasSuffix(err.Error(), "redirect refused") {
+		t.Errorf("message = %q, want the caller's own", err.Error())
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("calls = %d, want a single attempt", n)
+	}
+}
+
+func TestTheSDKsRefusalsAreRedirectRefusedErrors(t *testing.T) {
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	t.Cleanup(plain.Close)
+	secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(secure.Close)
+	looping := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(looping.Close)
+
+	for _, tc := range []struct {
+		client *Client
+		want   error
+	}{
+		{NewClient(secure.URL, WithHTTPClient(secure.Client())), ErrInsecureRedirect},
+		{NewClient(looping.URL), ErrTooManyRedirects},
+		{NewClient(secure.URL, WithHTTPClient(SafeRedirects(secure.Client()))), ErrInsecureRedirect},
+	} {
+		_, err := tc.client.GetThing(t.Context())
+		var refused *RedirectRefusedError
+		if !errors.As(err, &refused) || refused.Err != tc.want {
+			t.Errorf("got %v, want a single *RedirectRefusedError wrapping %v", err, tc.want)
+		}
+	}
+}
+
+func TestACallersPolicyFollowsWhatTheSDKsWouldStop(t *testing.T) {
+	other, rc := elsewhere(t)
+	own := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return nil }}
+	client := NewClient(redirecting(t, other.URL).URL, WithHTTPClient(own))
+
+	if _, err := client.CreateThing(t.Context()); err != nil {
+		t.Fatalf("CreateThing: %v", err)
+	}
+	if rc.hits.Load() != 1 {
+		t.Error("the caller's policy did not decide the redirect")
 	}
 }
 

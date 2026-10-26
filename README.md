@@ -73,7 +73,7 @@ gen/petstore/
 ├── operations.go    # ListPets(), CreatePet(), GetPetByID(), DeletePet()
 ├── options.go       # WithHTTPClient(), WithUserAgent()
 ├── pagination.go    # PageIterator[T], ListPetsIter()
-├── redirect.go      # CheckRedirect, SafeRedirects(), ErrInsecureRedirect
+├── redirect.go      # CheckRedirect, SafeRedirects(), ErrInsecureRedirect, RedirectRefusedError
 ├── retry.go         # RetryConfig, WithRetry(), WithDefaultRetry()
 └── types.go         # Pet, PetStatus, PetList, CreatePetRequest, Error
 ```

@@ -56,16 +56,35 @@ func bodilessMethod(method string) bool {
 	return method == http.MethodGet || method == http.MethodHead || method == ""
 }
 
-// SafeRedirects is c following redirects by CheckRedirect, unless it has a redirect policy of its own.
+// RedirectRefusedError is a redirect the client's redirect policy refused, which a retry would only refuse again.
+type RedirectRefusedError struct {
+	Err error
+}
+
+func (e *RedirectRefusedError) Error() string { return e.Err.Error() }
+
+func (e *RedirectRefusedError) Unwrap() error { return e.Err }
+
+// SafeRedirects is c following redirects by its own redirect policy, or by CheckRedirect when it has none, with
+// each refusal returned as a *RedirectRefusedError.
 func SafeRedirects(c *http.Client) *http.Client {
 	if c == nil {
 		c = http.DefaultClient
 	}
-	if c.CheckRedirect != nil {
-		return c
+	policy := c.CheckRedirect
+	if policy == nil {
+		policy = CheckRedirect
 	}
 	safe := *c
-	safe.CheckRedirect = CheckRedirect
+	safe.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		err := policy(req, via)
+		var refused *RedirectRefusedError
+		// net/http compares ErrUseLastResponse with ==, so it must come back unwrapped.
+		if err == nil || err == http.ErrUseLastResponse || errors.As(err, &refused) {
+			return err
+		}
+		return &RedirectRefusedError{Err: err}
+	}
 	return &safe
 }
 
