@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0](https://github.com/parallelworks/openapi-client-generator/compare/v0.3.0...v0.4.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **generator:** a redirect refusal is never retried, whatever its message or wrapping ([#147](https://github.com/parallelworks/openapi-client-generator/issues/147))
+
+### Bug Fixes
+
+* **generator:** a redirect refusal is never retried, whatever its message or wrapping ([#147](https://github.com/parallelworks/openapi-client-generator/issues/147)) ([5a5da04](https://github.com/parallelworks/openapi-client-generator/commit/5a5da046604aa46a80b99ced34bce363fce3dce5))
+
 ## [0.3.0](https://github.com/parallelworks/openapi-client-generator/compare/v0.2.13...v0.3.0) (2026-10-25)
 
 
