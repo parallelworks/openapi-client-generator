@@ -36,6 +36,7 @@ var ReservedIdentifiers = []string{
 	"NewClient",
 	"PageIterator",
 	"ProblemDetails",
+	"RedirectRefusedError",
 	"ParseCallback",
 	"ParseWebhook",
 	"ResponseMeta",
