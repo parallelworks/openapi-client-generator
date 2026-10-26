@@ -48,8 +48,11 @@ func TestE2E_Redirects(t *testing.T) {
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -414,6 +417,133 @@ func TestACallersPolicyFollowsWhatTheSDKsWouldStop(t *testing.T) {
 	}
 	if rc.hits.Load() != 1 {
 		t.Error("the caller's policy did not decide the redirect")
+	}
+}
+
+type transportFunc func(*http.Request) (*http.Response, error)
+
+func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestATransientErrorAMiddlewareReturnsWithAResponseIsRetried(t *testing.T) {
+	other, rc := elsewhere(t)
+	var calls atomic.Int32
+	flaky := func(req *http.Request, next RoundTripFunc) (*http.Response, error) {
+		if calls.Add(1) == 1 {
+			return &http.Response{StatusCode: http.StatusBadGateway}, io.ErrUnexpectedEOF
+		}
+		return next(req)
+	}
+	client := NewClient(other.URL, fastRetry(), WithMiddleware(flaky))
+
+	if _, err := client.GetThing(t.Context()); err != nil {
+		t.Fatalf("GetThing: %v", err)
+	}
+	if n := calls.Load(); n != 2 || rc.hits.Load() != 1 {
+		t.Errorf("calls = %d, hits = %d, want the transient failure retried once", n, rc.hits.Load())
+	}
+}
+
+func TestARetryAfterAMiddlewareReturnsWithAnErrorIsHonored(t *testing.T) {
+	other, rc := elsewhere(t)
+	var calls atomic.Int32
+	busy := func(req *http.Request, next RoundTripFunc) (*http.Response, error) {
+		if calls.Add(1) == 1 {
+			return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{"Retry-After": {"120"}}}, io.ErrUnexpectedEOF
+		}
+		return next(req)
+	}
+	client := NewClient(other.URL, fastRetry(), WithMiddleware(busy))
+
+	if _, err := client.GetThing(t.Context()); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("got %v, want the error handed back rather than a retry sooner than the server asked", err)
+	}
+	if n := calls.Load(); n != 1 || rc.hits.Load() != 0 {
+		t.Errorf("calls = %d, hits = %d, want no retry before the Retry-After", n, rc.hits.Load())
+	}
+}
+
+func TestARefusalAMiddlewaresOwnClientReturnsWithTheResponseIsNotRetried(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		http.Redirect(w, r, r.URL.Path, http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	own := func(req *http.Request, next RoundTripFunc) (*http.Response, error) {
+		return (&http.Client{}).Do(req)
+	}
+	client := NewClient(srv.URL, fastRetry(), WithMiddleware(own))
+
+	if _, err := client.GetThing(t.Context()); err == nil {
+		t.Fatal("expected net/http's refusal")
+	}
+	if n := calls.Load(); n != 10 {
+		t.Errorf("calls = %d, want one chain of redirects", n)
+	}
+}
+
+func TestAnUntypedRedirectRefusalFromATransportIsNotRetried(t *testing.T) {
+	for _, refusal := range []error{ErrInsecureRedirect, ErrTooManyRedirects} {
+		var calls atomic.Int32
+		inner := transportFunc(func(req *http.Request) (*http.Response, error) {
+			calls.Add(1)
+			return nil, &url.Error{Op: "Get", URL: req.URL.String(), Err: refusal}
+		})
+		client := NewClient("http://example.test", fastRetry(), WithHTTPClient(&http.Client{Transport: inner}))
+
+		_, err := client.GetThing(t.Context())
+		if !errors.Is(err, refusal) {
+			t.Fatalf("got %v, want %v", err, refusal)
+		}
+		if n := calls.Load(); n != 1 {
+			t.Errorf("calls = %d for %v, want a single attempt", n, refusal)
+		}
+	}
+}
+
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "timed out" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
+
+func TestARedirectRefusedErrorAnswersForItsError(t *testing.T) {
+	var empty RedirectRefusedError
+	if empty.Error() == "" || empty.Timeout() || empty.Temporary() {
+		t.Errorf("an empty RedirectRefusedError says %q, timeout %v, temporary %v", empty.Error(), empty.Timeout(), empty.Temporary())
+	}
+
+	var refusal net.Error = &RedirectRefusedError{Err: timeoutError{}}
+	if !refusal.Timeout() || !refusal.Temporary() {
+		t.Error("a refusal of a timeout does not report one")
+	}
+	if wrapped := (&RedirectRefusedError{Err: fmt.Errorf("policy: %w", timeoutError{})}); !wrapped.Timeout() || !wrapped.Temporary() {
+		t.Error("a refusal of a wrapped timeout does not report one")
+	}
+	if !(&url.Error{Op: "Get", URL: "https://example.test", Err: refusal}).Timeout() {
+		t.Error("url.Error.Timeout does not see the refusal's timeout")
+	}
+
+	plain := &RedirectRefusedError{Err: ErrInsecureRedirect}
+	if plain.Timeout() || plain.Temporary() {
+		t.Error("a refusal of a plain error reports a timeout")
+	}
+}
+
+func TestAMiddlewareThatReturnsNothingIsAnErrorAndNotRetried(t *testing.T) {
+	var calls atomic.Int32
+	empty := func(*http.Request, RoundTripFunc) (*http.Response, error) {
+		calls.Add(1)
+		return nil, nil
+	}
+	client := NewClient("http://example.test", fastRetry(), WithMiddleware(empty))
+
+	_, err := client.GetThing(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "middleware returned no response and no error") {
+		t.Fatalf("got %v, want the middleware's missing response", err)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("calls = %d, want a single attempt", n)
 	}
 }
 

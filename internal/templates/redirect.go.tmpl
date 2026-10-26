@@ -61,9 +61,26 @@ type RedirectRefusedError struct {
 	Err error
 }
 
-func (e *RedirectRefusedError) Error() string { return e.Err.Error() }
+func (e *RedirectRefusedError) Error() string {
+	if e.Err == nil {
+		return "redirect refused"
+	}
+	return e.Err.Error()
+}
 
 func (e *RedirectRefusedError) Unwrap() error { return e.Err }
+
+// Timeout reports whether the refusal's error is a timeout, as url.Error.Timeout asks.
+func (e *RedirectRefusedError) Timeout() bool {
+	var t interface{ Timeout() bool }
+	return errors.As(e.Err, &t) && t.Timeout()
+}
+
+// Temporary reports whether the refusal's error is temporary, as net.Error asks.
+func (e *RedirectRefusedError) Temporary() bool {
+	var t interface{ Temporary() bool }
+	return errors.As(e.Err, &t) && t.Temporary()
+}
 
 // SafeRedirects is c following redirects by its own redirect policy, or by CheckRedirect when it has none, with
 // each refusal returned as a *RedirectRefusedError.
