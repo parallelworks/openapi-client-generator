@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/parallelworks/openapi-client-generator/compare/v0.4.0...v0.4.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **generator:** a transient failure a middleware returns with a response is not retried, and a refusal from an inner client is resent ([#149](https://github.com/parallelworks/openapi-client-generator/issues/149)) ([130c680](https://github.com/parallelworks/openapi-client-generator/commit/130c680bb7ca9eaf0e5c03c17ba38ee1a4a879ff))
+
 ## [0.4.0](https://github.com/parallelworks/openapi-client-generator/compare/v0.3.0...v0.4.0) (2026-10-26)
 
 
