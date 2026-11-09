@@ -6,7 +6,7 @@ toolchain go1.27.3
 
 require (
 	github.com/giraffesyo/openapi-go-naming v0.1.1
-	github.com/pb33f/libopenapi v0.41.7
+	github.com/pb33f/libopenapi v0.42.3
 	github.com/spf13/cobra v1.10.2
 )
 
